@@ -72,7 +72,7 @@ def register_employee():
         payload = request.form.to_dict()
 
     # Validate required fields
-    required_fields = ["first_name", "last_name"]
+    required_fields = ["first_name"]  # last_name is now optional
     missing_fields = [field for field in required_fields if not payload.get(field)]
 
     if missing_fields:
@@ -107,10 +107,20 @@ def register_employee():
 @employees_bp.route("/bulk-upload", methods=["POST"])
 def bulk_upload():
     """
+    Bulk Employee Import Endpoint
+
     Multipart form-data:
       - file: Excel (.xlsx/.xls)
-    Expected columns in every sheet:
-      Full Name, Date of Birth, Gender, Site Name, Rank, State, Base Salary
+
+    Supports two formats:
+    1. New Format (Comprehensive): Full Name, Date of Birth, Gender, Marital Status,
+       Permanent Address, Mobile Number, Aadhaar Number, PAN Card Number,
+       Date of Joining, Employment Type, Department, Designation, Work Location,
+       Salary Code, and many other optional fields
+
+    2. Legacy Format: Full Name, Date of Birth, Gender, Site Name, Rank, State, Base Salary
+
+    The system automatically detects the format and processes accordingly.
     """
     file = request.files.get("file")
     if not file:

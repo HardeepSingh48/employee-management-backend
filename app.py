@@ -20,8 +20,15 @@ def create_app():
     app.config["MAX_CONTENT_LENGTH"] = MAX_CONTENT_LENGTH
     app.config["SECRET_KEY"] = SECRET_KEY
 
-    # Enable CORS for all routes
-    CORS(app, origins=["http://localhost:3000"])
+    # Configure Flask to be more lenient with trailing slashes
+    app.url_map.strict_slashes = False
+
+    # Enable CORS for all routes with more permissive settings for development
+    CORS(app,
+         origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+         methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+         allow_headers=["Content-Type", "Authorization"],
+         supports_credentials=True)
 
     # Ensure uploads dir exists
     os.makedirs(UPLOADS_DIR, exist_ok=True)

@@ -6,6 +6,28 @@ import re
 
 salary_codes_bp = Blueprint("salary_codes_api", __name__)
 
+@salary_codes_bp.route("/test", methods=["GET", "POST", "OPTIONS"])
+def test_cors():
+    """Test endpoint to verify CORS is working"""
+    return jsonify({
+        "success": True,
+        "message": "CORS test successful",
+        "method": request.method
+    })
+
+@salary_codes_bp.route("/create", methods=["POST", "OPTIONS"])
+def create_salary_code_alt():
+    """Alternative endpoint for creating salary codes (without trailing slash issues)"""
+    # print(f"🔍 Alternative endpoint - Received {request.method} request to {request.url}")
+
+    # Handle preflight OPTIONS request
+    if request.method == 'OPTIONS':
+        # print("✅ Alternative endpoint - Handling OPTIONS preflight request")
+        return '', 200
+
+    # Delegate to the main create function logic
+    return create_salary_code()
+
 @salary_codes_bp.route("/", methods=["GET"])
 def list_salary_codes():
     """List all active salary codes"""
@@ -37,14 +59,25 @@ def list_salary_codes():
         return jsonify({"success": False, "message": str(e)}), 400
 
 
-@salary_codes_bp.route("/", methods=["POST"])
+@salary_codes_bp.route("/", methods=["POST", "OPTIONS"])
 def create_salary_code():
     """Create a new salary code"""
+    # print(f"🔍 Received {request.method} request to {request.url}")
+    # print(f"🔍 Request headers: {dict(request.headers)}")
+    # print(f"🔍 Request origin: {request.headers.get('Origin', 'No origin')}")
+
+    # Handle preflight OPTIONS request
+    if request.method == 'OPTIONS':
+        # print("✅ Handling OPTIONS preflight request")
+        return '', 200
+
     try:
         if request.is_json:
             payload = request.get_json()
+            # print(f"📦 JSON payload: {payload}")
         else:
             payload = request.form.to_dict()
+            # print(f"📦 Form payload: {payload}")
 
         # Validate required fields
         required_fields = ['site_name', 'rank', 'state', 'base_wage']
@@ -55,8 +88,8 @@ def create_salary_code():
                 "message": f"Missing required fields: {', '.join(missing_fields)}"
             }), 400
 
-        # Validate the data
-        errors = validate_wage_master_data(payload)
+        # Validate the data (skip skill_level validation for salary code creation)
+        errors = validate_wage_master_data(payload, validate_skill_level=False)
         if errors:
             return jsonify({"success": False, "message": "Validation errors", "errors": errors}), 400
 
@@ -85,13 +118,16 @@ def create_salary_code():
             payload["state"]
         )
 
+        # Set default skill level - will be updated during employee registration
+        skill_level = "Not Specified"  # Default value, will be set when employee is registered
+
         wage_master = WageMaster(
             salary_code=salary_code,
             site_name=payload["site_name"],
             rank=payload["rank"],
             state=payload["state"],
             base_wage=float(payload["base_wage"]),
-            skill_level="Not Specified",  # Default value, will be set during employee registration
+            skill_level=skill_level,
             created_by=payload.get("created_by", "admin")
         )
         
