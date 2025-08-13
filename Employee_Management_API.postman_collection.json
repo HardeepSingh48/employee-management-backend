@@ -1,0 +1,247 @@
+{
+	"info": {
+		"_postman_id": "employee-mgmt-api",
+		"name": "Employee Management API",
+		"description": "API collection for Employee Management System",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "Root Endpoint",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "http://127.0.0.1:5000/",
+					"protocol": "http",
+					"host": ["127", "0", "0", "1"],
+					"port": "5000",
+					"path": [""]
+				}
+			}
+		},
+		{
+			"name": "List Departments",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "http://127.0.0.1:5000/api/departments/",
+					"protocol": "http",
+					"host": ["127", "0", "0", "1"],
+					"port": "5000",
+					"path": ["api", "departments", ""]
+				}
+			}
+		},
+		{
+			"name": "Create Department",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"department_id\": \"MKT\",\n    \"department_name\": \"Marketing\",\n    \"description\": \"Marketing Department\",\n    \"created_by\": \"admin\"\n}"
+				},
+				"url": {
+					"raw": "http://127.0.0.1:5000/api/departments/",
+					"protocol": "http",
+					"host": ["127", "0", "0", "1"],
+					"port": "5000",
+					"path": ["api", "departments", ""]
+				}
+			}
+		},
+		{
+			"name": "Get Department by ID",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "http://127.0.0.1:5000/api/departments/IT",
+					"protocol": "http",
+					"host": ["127", "0", "0", "1"],
+					"port": "5000",
+					"path": ["api", "departments", "IT"]
+				}
+			}
+		},
+		{
+			"name": "List Employees",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "http://127.0.0.1:5000/api/employees/?page=1&per_page=10",
+					"protocol": "http",
+					"host": ["127", "0", "0", "1"],
+					"port": "5000",
+					"path": ["api", "employees", ""],
+					"query": [
+						{
+							"key": "page",
+							"value": "1"
+						},
+						{
+							"key": "per_page",
+							"value": "10"
+						}
+					]
+				}
+			}
+		},
+		{
+			"name": "Register Employee",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"first_name\": \"John\",\n    \"last_name\": \"Doe\",\n    \"father_name\": \"Robert Doe\",\n    \"date_of_birth\": \"1990-01-15\",\n    \"gender\": \"Male\",\n    \"marital_status\": \"unmarried\",\n    \"nationality\": \"Indian\",\n    \"blood_group\": \"O+\",\n    \"address\": \"123 Main Street, Delhi\",\n    \"phone_number\": \"9876543210\",\n    \"email\": \"john.doe@company.com\",\n    \"adhar_number\": \"123456789012\",\n    \"pan_card_number\": \"ABCDE1234F\",\n    \"hire_date\": \"2023-01-01\",\n    \"employment_type\": \"Full-time\",\n    \"department_id\": \"IT\",\n    \"designation\": \"Software Engineer\",\n    \"work_location\": \"Delhi Central\",\n    \"reporting_manager\": \"Manager Name\",\n    \"base_salary\": 50000,\n    \"skill_category\": \"Technical\",\n    \"wage_rate\": 500,\n    \"pf_applicable\": true,\n    \"esic_applicable\": true,\n    \"professional_tax_applicable\": true,\n    \"bank_account_number\": \"1234567890\",\n    \"bank_name\": \"State Bank of India\",\n    \"ifsc_code\": \"SBIN0001234\",\n    \"highest_qualification\": \"Bachelor\",\n    \"year_of_passing\": 2012,\n    \"experience_duration\": 5,\n    \"emergency_contact_name\": \"Jane Doe\",\n    \"emergency_relationship\": \"Spouse\",\n    \"emergency_phone_number\": \"9876543211\",\n    \"site_name\": \"Delhi Central\",\n    \"rank\": \"Engineer\",\n    \"state\": \"Delhi\"\n}"
+				},
+				"url": {
+					"raw": "http://127.0.0.1:5000/api/employees/register",
+					"protocol": "http",
+					"host": ["127", "0", "0", "1"],
+					"port": "5000",
+					"path": ["api", "employees", "register"]
+				}
+			}
+		},
+		{
+			"name": "Search Employees",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "http://127.0.0.1:5000/api/employees/search?q=John&department=IT&status=active",
+					"protocol": "http",
+					"host": ["127", "0", "0", "1"],
+					"port": "5000",
+					"path": ["api", "employees", "search"],
+					"query": [
+						{
+							"key": "q",
+							"value": "John"
+						},
+						{
+							"key": "department",
+							"value": "IT"
+						},
+						{
+							"key": "status",
+							"value": "active"
+						}
+					]
+				}
+			}
+		},
+		{
+			"name": "List Salary Codes",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "http://127.0.0.1:5000/api/salary-codes/",
+					"protocol": "http",
+					"host": ["127", "0", "0", "1"],
+					"port": "5000",
+					"path": ["api", "salary-codes", ""]
+				}
+			}
+		},
+		{
+			"name": "Create Salary Code",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"site_name\": \"Mumbai Office\",\n    \"rank\": \"Manager\",\n    \"state\": \"Maharashtra\",\n    \"base_wage\": 75000,\n    \"created_by\": \"admin\"\n}"
+				},
+				"url": {
+					"raw": "http://127.0.0.1:5000/api/salary-codes/",
+					"protocol": "http",
+					"host": ["127", "0", "0", "1"],
+					"port": "5000",
+					"path": ["api", "salary-codes", ""]
+				}
+			}
+		},
+		{
+			"name": "Bulk Create Salary Codes",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"salary_codes\": [\n        {\n            \"site_name\": \"Bangalore Office\",\n            \"rank\": \"Developer\",\n            \"state\": \"Karnataka\",\n            \"base_wage\": 55000\n        },\n        {\n            \"site_name\": \"Chennai Office\",\n            \"rank\": \"Analyst\",\n            \"state\": \"Tamil Nadu\",\n            \"base_wage\": 45000\n        },\n        {\n            \"site_name\": \"Pune Office\",\n            \"rank\": \"Lead\",\n            \"state\": \"Maharashtra\",\n            \"base_wage\": 70000\n        }\n    ]\n}"
+				},
+				"url": {
+					"raw": "http://127.0.0.1:5000/api/salary-codes/bulk",
+					"protocol": "http",
+					"host": ["127", "0", "0", "1"],
+					"port": "5000",
+					"path": ["api", "salary-codes", "bulk"]
+				}
+			}
+		},
+		{
+			"name": "Get Salary Code Details",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "http://127.0.0.1:5000/api/salary-codes/DELENGINEERDELHI",
+					"protocol": "http",
+					"host": ["127", "0", "0", "1"],
+					"port": "5000",
+					"path": ["api", "salary-codes", "DELENGINEERDELHI"]
+				}
+			}
+		},
+		{
+			"name": "Register Employee with Salary Code",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"first_name\": \"John\",\n    \"last_name\": \"Doe\",\n    \"father_name\": \"Robert Doe\",\n    \"date_of_birth\": \"1990-01-15\",\n    \"gender\": \"Male\",\n    \"marital_status\": \"unmarried\",\n    \"nationality\": \"Indian\",\n    \"blood_group\": \"O+\",\n    \"address\": \"123 Main Street, Delhi\",\n    \"phone_number\": \"9876543210\",\n    \"email\": \"john.doe@company.com\",\n    \"adhar_number\": \"123456789012\",\n    \"pan_card_number\": \"ABCDE1234F\",\n    \"hire_date\": \"2023-01-01\",\n    \"employment_type\": \"Full-time\",\n    \"department_id\": \"IT\",\n    \"designation\": \"Software Engineer\",\n    \"work_location\": \"Delhi Central\",\n    \"reporting_manager\": \"Manager Name\",\n    \"salary_code\": \"DELENGINEERDELHI\",\n    \"skill_level\": \"Highly Skilled\",\n    \"pf_applicable\": true,\n    \"esic_applicable\": true,\n    \"professional_tax_applicable\": true,\n    \"bank_account_number\": \"1234567890\",\n    \"bank_name\": \"State Bank of India\",\n    \"ifsc_code\": \"SBIN0001234\",\n    \"highest_qualification\": \"Bachelor\",\n    \"year_of_passing\": 2012,\n    \"experience_duration\": 5,\n    \"emergency_contact_name\": \"Jane Doe\",\n    \"emergency_relationship\": \"Spouse\",\n    \"emergency_phone_number\": \"9876543211\"\n}"
+				},
+				"url": {
+					"raw": "http://127.0.0.1:5000/api/employees/register",
+					"protocol": "http",
+					"host": ["127", "0", "0", "1"],
+					"port": "5000",
+					"path": ["api", "employees", "register"]
+				}
+			}
+		}
+	]
+}

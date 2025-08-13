@@ -21,7 +21,7 @@ STATES = [
 ]
 
 RANKS = [
-    'SS', 'JSS', 'ASS', 'DS', 'JDS', 'ADS', 'EE', 'JEE', 'AEE',
+    'SS','SG', 'JSS', 'ASS', 'DS', 'JDS', 'ADS', 'EE', 'JEE', 'AEE',
     'SE', 'JSE', 'ASE', 'ME', 'JME', 'AME', 'CE', 'JCE', 'ACE',
     'TL', 'JTL', 'ATL', 'MGR', 'JMGR', 'AMGR', 'GM', 'JGM', 'AGM'
 ]
