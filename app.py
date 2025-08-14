@@ -10,6 +10,7 @@ from models import db
 from routes.employees import employees_bp
 from routes.departments import departments_bp
 from routes.salary_codes import salary_codes_bp
+from routes.attendance import attendance_bp
 import os
 from config import UPLOADS_DIR
 
@@ -38,6 +39,7 @@ def create_app():
     app.register_blueprint(employees_bp, url_prefix="/api/employees")
     app.register_blueprint(departments_bp, url_prefix="/api/departments")
     app.register_blueprint(salary_codes_bp, url_prefix="/api/salary-codes")
+    app.register_blueprint(attendance_bp, url_prefix="/api/attendance")
 
     # Add a simple root route for testing
     @app.route("/")
@@ -48,7 +50,8 @@ def create_app():
             "endpoints": {
                 "employees": "/api/employees",
                 "departments": "/api/departments",
-                "salary_codes": "/api/salary-codes"
+                "salary_codes": "/api/salary-codes",
+                "attendance": "/api/attendance"
             }
         }
 

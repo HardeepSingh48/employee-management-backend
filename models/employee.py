@@ -24,7 +24,7 @@ class Employee(db.Model):
     #job_title = db.Column(db.String(100))
     #family_details = db.Column(db.String(500))
     department_id = db.Column(db.String(50), db.ForeignKey("departments.department_id"))
-    #employment_status = db.Column(db.String(20), db.CheckConstraint("employment_status IN ('Active', 'Inactive', 'On Leave')"), default='Active')
+    employment_status = db.Column(db.String(20), db.CheckConstraint("employment_status IN ('Active', 'Inactive', 'On Leave')"), default='Active')
 
     # Additional fields for comprehensive registration
     gender = db.Column(db.String(20))
