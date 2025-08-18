@@ -1,11 +1,19 @@
+# Core Flask dependencies
 Flask==3.0.3
 Flask-SQLAlchemy==3.1.1
 Flask-Migrate==4.0.7
 Flask-CORS==4.0.0
-psycopg2-binary==2.9.9
-python-dotenv==1.0.1
-pandas==2.2.2
-openpyxl==3.1.5
 Werkzeug==3.0.3
-PyJWT==2.8.0
 gunicorn==21.2.0
+
+# Database
+psycopg2-binary==2.9.9
+
+# Utilities
+python-dotenv==1.0.1
+PyJWT==2.8.0
+
+# Data processing (with compatible versions)
+numpy==1.24.4
+pandas==2.0.3
+openpyxl==3.1.5
