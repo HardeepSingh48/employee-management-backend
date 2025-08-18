@@ -24,8 +24,19 @@ def create_app():
     app.url_map.strict_slashes = False
 
     # Enable CORS for all routes with specific configuration
+    # Allow your frontend domain in production
+    allowed_origins = [
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:3001"
+    ]
+
+    # Add your production frontend URL here when you deploy it
+    # allowed_origins.append("https://your-frontend-domain.com")
+
     CORS(app,
-         origins=["http://localhost:3000", "http://localhost:3001", "http://127.0.0.1:3000", "http://127.0.0.1:3001"],
+         origins=allowed_origins,
          methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
          allow_headers=["Content-Type", "Authorization", "X-Requested-With", "Accept", "Origin"],
          supports_credentials=True,
@@ -72,4 +83,7 @@ def create_app():
 app = create_app()
 
 if __name__ == "__main__":
-    app.run(port=5000, debug=True)
+    # For local development
+    port = int(os.environ.get("PORT", 5000))
+    debug = os.environ.get("FLASK_ENV") != "production"
+    app.run(host="0.0.0.0", port=port, debug=debug)
