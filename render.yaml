@@ -1,0 +1,38 @@
+services:
+  - type: web
+    name: employee-management-backend
+    env: python
+    buildCommand: "cd employee-management-backend && pip install -r requirements.txt"
+    startCommand: "cd employee-management-backend && chmod +x start.sh && ./start.sh"
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.0
+      - key: DB_HOST
+        fromDatabase:
+          name: employee-management-db
+          property: host
+      - key: DB_PORT
+        fromDatabase:
+          name: employee-management-db
+          property: port
+      - key: DB_NAME
+        fromDatabase:
+          name: employee-management-db
+          property: database
+      - key: DB_USER
+        fromDatabase:
+          name: employee-management-db
+          property: user
+      - key: DB_PASSWORD
+        fromDatabase:
+          name: employee-management-db
+          property: password
+      - key: SECRET_KEY
+        generateValue: true
+      - key: UPLOADS_DIR
+        value: /tmp/uploads/employees
+
+databases:
+  - name: employee-management-db
+    databaseName: sspl_db
+    user: sspl_user
