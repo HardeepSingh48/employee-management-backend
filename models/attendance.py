@@ -1,7 +1,7 @@
 from models import db
 from sqlalchemy.sql import func
+from datetime import datetime, time
 import uuid
-from datetime import datetime
 
 class Attendance(db.Model):
     __tablename__ = "attendance"
@@ -9,54 +9,36 @@ class Attendance(db.Model):
     attendance_id = db.Column(db.String(50), primary_key=True, default=lambda: str(uuid.uuid4()))
     employee_id = db.Column(db.String(50), db.ForeignKey("employees.employee_id"), nullable=False)
     attendance_date = db.Column(db.Date, nullable=False)
-
-    # Time tracking
     check_in_time = db.Column(db.DateTime)
     check_out_time = db.Column(db.DateTime)
-
-    # Attendance status with enhanced options
     attendance_status = db.Column(db.String(20),
-        db.CheckConstraint("attendance_status IN ('Present', 'Absent', 'Late', 'Half Day', 'Holiday', 'Leave')"),
-        nullable=False, default='Present')
+                                db.CheckConstraint("attendance_status IN ('Present', 'Absent', 'Late', 'Half Day', 'Holiday', 'Leave')"),
+                                default='Present')
 
-    # Additional fields for salary calculation
-    overtime_hours = db.Column(db.Float, default=0.0)  # Overtime hours worked
-    late_minutes = db.Column(db.Integer, default=0)    # Minutes late
-    early_departure_minutes = db.Column(db.Integer, default=0)  # Minutes left early
-
-    # Work details
-    total_hours_worked = db.Column(db.Float, default=8.0)  # Standard 8 hours
-    is_holiday = db.Column(db.Boolean, default=False)      # Is this date a holiday
-    is_weekend = db.Column(db.Boolean, default=False)      # Is this date a weekend
-
-    # Notes and remarks
-    remarks = db.Column(db.Text)  # Any special notes
-    marked_by = db.Column(db.String(20), default='employee')  # 'employee', 'admin', 'system'
-
-    # Approval workflow (for future use)
+    # Additional attendance fields
+    overtime_hours = db.Column(db.Float, default=0.0)
+    late_minutes = db.Column(db.Integer, default=0)
+    early_departure_minutes = db.Column(db.Integer, default=0)
+    total_hours_worked = db.Column(db.Float, default=8.0)
+    is_holiday = db.Column(db.Boolean, default=False)
+    is_weekend = db.Column(db.Boolean, default=False)
+    remarks = db.Column(db.Text)
+    marked_by = db.Column(db.String(20), default='employee')
     is_approved = db.Column(db.Boolean, default=True)
     approved_by = db.Column(db.String(100))
     approved_date = db.Column(db.DateTime)
 
     # Audit fields
-    created_date = db.Column(db.DateTime, server_default=func.now())
+    created_date = db.Column(db.Date, server_default=func.current_date())
     created_by = db.Column(db.String(100))
-    updated_date = db.Column(db.DateTime, onupdate=func.now())
+    updated_date = db.Column(db.Date, onupdate=func.current_date())
     updated_by = db.Column(db.String(100))
 
     # Relationship
     employee = db.relationship("Employee", backref="attendance_records")
 
-    # Unique constraint to prevent duplicate attendance for same employee on same date
-    __table_args__ = (
-        db.UniqueConstraint('employee_id', 'attendance_date', name='unique_employee_date_attendance'),
-    )
-
-    def __repr__(self):
-        return f"<Attendance {self.attendance_id} - {self.employee_id} - {self.attendance_date} - {self.attendance_status}>"
-
     def to_dict(self):
-        """Convert attendance record to dictionary for API responses"""
+        """Convert attendance record to dictionary"""
         return {
             'attendance_id': self.attendance_id,
             'employee_id': self.employee_id,
@@ -73,30 +55,46 @@ class Attendance(db.Model):
             'remarks': self.remarks,
             'marked_by': self.marked_by,
             'is_approved': self.is_approved,
-            'created_date': self.created_date.isoformat() if self.created_date else None
+            'approved_by': self.approved_by,
+            'approved_date': self.approved_date.isoformat() if self.approved_date else None,
+            'created_date': self.created_date.isoformat() if self.created_date else None,
+            'created_by': self.created_by,
+            'updated_date': self.updated_date.isoformat() if self.updated_date else None,
+            'updated_by': self.updated_by
         }
 
     @staticmethod
     def calculate_work_hours(check_in_time, check_out_time):
-        """Calculate total work hours from check-in and check-out times"""
+        """Calculate total work hours between check-in and check-out"""
         if not check_in_time or not check_out_time:
-            return 0.0
+            return 8.0  # Default work hours
+
+        if isinstance(check_in_time, str):
+            check_in_time = datetime.fromisoformat(check_in_time.replace('Z', '+00:00'))
+        if isinstance(check_out_time, str):
+            check_out_time = datetime.fromisoformat(check_out_time.replace('Z', '+00:00'))
 
         time_diff = check_out_time - check_in_time
         return round(time_diff.total_seconds() / 3600, 2)  # Convert to hours
 
     @staticmethod
-    def is_late(check_in_time, standard_start_time="09:00"):
-        """Check if employee is late based on standard start time"""
+    def is_late(check_in_time, standard_start_time=time(9, 0)):
+        """Check if employee is late and calculate late minutes"""
         if not check_in_time:
             return False, 0
 
-        # Convert standard_start_time to datetime for comparison
-        standard_time = datetime.strptime(standard_start_time, "%H:%M").time()
-        standard_datetime = datetime.combine(check_in_time.date(), standard_time)
+        if isinstance(check_in_time, str):
+            check_in_time = datetime.fromisoformat(check_in_time.replace('Z', '+00:00'))
 
-        if check_in_time > standard_datetime:
+        check_in_time_only = check_in_time.time()
+
+        if check_in_time_only > standard_start_time:
+            # Calculate late minutes
+            standard_datetime = datetime.combine(check_in_time.date(), standard_start_time)
             late_minutes = int((check_in_time - standard_datetime).total_seconds() / 60)
             return True, late_minutes
 
         return False, 0
+
+    def __repr__(self):
+        return f"<Attendance {self.attendance_id} - {self.employee_id} - {self.attendance_date}>"

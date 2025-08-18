@@ -72,7 +72,7 @@ def register_employee():
         payload = request.form.to_dict()
 
     # Validate required fields
-    required_fields = ["first_name"]  # last_name is now optional
+    required_fields = ["first_name", "last_name"]
     missing_fields = [field for field in required_fields if not payload.get(field)]
 
     if missing_fields:
@@ -107,20 +107,10 @@ def register_employee():
 @employees_bp.route("/bulk-upload", methods=["POST"])
 def bulk_upload():
     """
-    Bulk Employee Import Endpoint
-
     Multipart form-data:
       - file: Excel (.xlsx/.xls)
-
-    Supports two formats:
-    1. New Format (Comprehensive): Full Name, Date of Birth, Gender, Marital Status,
-       Permanent Address, Mobile Number, Aadhaar Number, PAN Card Number,
-       Date of Joining, Employment Type, Department, Designation, Work Location,
-       Salary Code, and many other optional fields
-
-    2. Legacy Format: Full Name, Date of Birth, Gender, Site Name, Rank, State, Base Salary
-
-    The system automatically detects the format and processes accordingly.
+    Expected columns in every sheet:
+      Full Name, Date of Birth, Gender, Site Name, Rank, State, Base Salary
     """
     file = request.files.get("file")
     if not file:
@@ -170,7 +160,8 @@ def get_employee(employee_id):
         return jsonify({"success": False, "message": str(e)}), 400
 
 
-@employees_bp.route("/", methods=["GET"])
+@employees_bp.route("/", methods=["GET", "OPTIONS"])
+@employees_bp.route("/list", methods=["GET", "OPTIONS"])
 def list_employees():
     """List all employees with pagination"""
     try:
@@ -202,6 +193,39 @@ def list_employees():
                 "total": employees.total,
                 "pages": employees.pages
             }
+        }), 200
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 400
+
+
+@employees_bp.route("/all", methods=["GET", "OPTIONS"])
+def get_all_employees_simple():
+    """Get all employees without pagination (for dropdowns, etc.)"""
+    try:
+        employees = get_all_employees()
+
+        # Handle both paginated and non-paginated results
+        if hasattr(employees, 'items'):
+            employee_list = employees.items
+        else:
+            employee_list = employees
+
+        simple_list = []
+        for emp in employee_list:
+            simple_list.append({
+                "employee_id": emp.employee_id,
+                "first_name": emp.first_name,
+                "last_name": emp.last_name,
+                "full_name": f"{emp.first_name} {emp.last_name}",
+                "email": emp.email,
+                "department_id": emp.department_id,
+                "employment_status": emp.employment_status
+            })
+
+        return jsonify({
+            "success": True,
+            "data": simple_list,
+            "count": len(simple_list)
         }), 200
     except Exception as e:
         return jsonify({"success": False, "message": str(e)}), 400

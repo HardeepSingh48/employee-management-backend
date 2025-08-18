@@ -10,19 +10,19 @@ class Employee(db.Model):
     # Personal Information
     first_name = db.Column(db.String(100), nullable=False)
     last_name = db.Column(db.String(100), nullable=False)
-    #father_name = db.Column(db.String(100))
+    father_name = db.Column(db.String(100))
     address = db.Column(db.String(500))
     adhar_number = db.Column(db.String(20))
-    #place_of_birth = db.Column(db.String(100))
-    marital_status = db.Column(db.String(20), db.CheckConstraint("marital_status IN ('Single', 'Married', 'Divorced', 'Widowed')"))
+    place_of_birth = db.Column(db.String(100))
+    marital_status = db.Column(db.String(20), db.CheckConstraint("marital_status IN ('unmarried', 'married')"))
     date_of_birth = db.Column(db.Date)
     email = db.Column(db.String(120))
     phone_number = db.Column(db.String(20))
 
     # Employment Information
     hire_date = db.Column(db.Date)
-    #job_title = db.Column(db.String(100))
-    #family_details = db.Column(db.String(500))
+    job_title = db.Column(db.String(100))
+    family_details = db.Column(db.String(500))
     department_id = db.Column(db.String(50), db.ForeignKey("departments.department_id"))
     employment_status = db.Column(db.String(20), db.CheckConstraint("employment_status IN ('Active', 'Inactive', 'On Leave')"), default='Active')
 

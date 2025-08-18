@@ -11,47 +11,59 @@ from routes.employees import employees_bp
 from routes.departments import departments_bp
 from routes.salary_codes import salary_codes_bp
 from routes.attendance import attendance_bp
+from routes.salary import salary_bp
+from routes.auth import auth_bp
+from routes.employee_dashboard import employee_dashboard_bp
 import os
 from config import UPLOADS_DIR
 
 def create_app():
     app = Flask(__name__)
+
+    # Disable strict slashes to avoid redirect issues with CORS
+    app.url_map.strict_slashes = False
+
+    # Enable CORS for all routes with specific configuration
+    CORS(app,
+         origins=["http://localhost:3000", "http://localhost:3001", "http://127.0.0.1:3000", "http://127.0.0.1:3001"],
+         methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+         allow_headers=["Content-Type", "Authorization", "X-Requested-With", "Accept", "Origin"],
+         supports_credentials=True,
+         expose_headers=["Content-Type", "Authorization"])
+
     app.config["SQLALCHEMY_DATABASE_URI"] = SQLALCHEMY_DATABASE_URI
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = SQLALCHEMY_TRACK_MODIFICATIONS
     app.config["MAX_CONTENT_LENGTH"] = MAX_CONTENT_LENGTH
     app.config["SECRET_KEY"] = SECRET_KEY
-
-    # Configure Flask to be more lenient with trailing slashes
-    app.url_map.strict_slashes = False
-
-    # Enable CORS for all routes with more permissive settings for development
-    CORS(app,
-         origins=["http://localhost:3000", "http://127.0.0.1:3000"],
-         methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-         allow_headers=["Content-Type", "Authorization"],
-         supports_credentials=True)
 
     # Ensure uploads dir exists
     os.makedirs(UPLOADS_DIR, exist_ok=True)
 
     db.init_app(app)
 
+    # Register all blueprints
+    app.register_blueprint(auth_bp, url_prefix="/api/auth")
+    app.register_blueprint(employee_dashboard_bp, url_prefix="/api/employee")
     app.register_blueprint(employees_bp, url_prefix="/api/employees")
     app.register_blueprint(departments_bp, url_prefix="/api/departments")
     app.register_blueprint(salary_codes_bp, url_prefix="/api/salary-codes")
     app.register_blueprint(attendance_bp, url_prefix="/api/attendance")
+    app.register_blueprint(salary_bp, url_prefix="/api/salary")
 
     # Add a simple root route for testing
     @app.route("/")
     def home():
         return {
             "message": "Employee Management System API",
-            "version": "1.0",
+            "version": "2.0",
             "endpoints": {
+                "auth": "/api/auth",
+                "employee_dashboard": "/api/employee",
                 "employees": "/api/employees",
                 "departments": "/api/departments",
                 "salary_codes": "/api/salary-codes",
-                "attendance": "/api/attendance"
+                "attendance": "/api/attendance",
+                "salary": "/api/salary"
             }
         }
 

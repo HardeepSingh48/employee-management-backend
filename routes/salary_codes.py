@@ -1,14 +1,44 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, make_response
 from models import db
 from models.wage_master import WageMaster
 from utils.validators import validate_wage_master_data
 import re
+from functools import wraps
+
+def add_cors_headers(response):
+    """Add CORS headers to response"""
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Requested-With,Accept,Origin')
+    response.headers.add('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS,PATCH')
+    response.headers.add('Access-Control-Allow-Credentials', 'true')
+    return response
+
+def cors_enabled(f):
+    """Decorator to add CORS headers to routes"""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if request.method == 'OPTIONS':
+            response = make_response()
+            return add_cors_headers(response)
+
+        result = f(*args, **kwargs)
+        if isinstance(result, tuple):
+            response = make_response(result[0])
+            response.status_code = result[1]
+        else:
+            response = make_response(result)
+
+        return add_cors_headers(response)
+    return decorated_function
 
 salary_codes_bp = Blueprint("salary_codes_api", __name__)
 
 @salary_codes_bp.route("/test", methods=["GET", "POST", "OPTIONS"])
+@cors_enabled
 def test_cors():
     """Test endpoint to verify CORS is working"""
+    print(f"🔍 CORS test endpoint - Received {request.method} request")
+
     return jsonify({
         "success": True,
         "message": "CORS test successful",
@@ -28,9 +58,14 @@ def create_salary_code_alt():
     # Delegate to the main create function logic
     return create_salary_code()
 
-@salary_codes_bp.route("/", methods=["GET"])
+@salary_codes_bp.route("/", methods=["GET", "OPTIONS"])
+@salary_codes_bp.route("", methods=["GET", "OPTIONS"])
+@cors_enabled
 def list_salary_codes():
     """List all active salary codes"""
+    # print(f"🔍 Salary codes endpoint - Received {request.method} request to {request.url}")
+    # print(f"🔍 Request headers: {dict(request.headers)}")
+
     try:
         wage_masters = WageMaster.query.filter_by(is_active=True).all()
         
@@ -57,6 +92,17 @@ def list_salary_codes():
         }), 200
     except Exception as e:
         return jsonify({"success": False, "message": str(e)}), 400
+
+
+@salary_codes_bp.route("/list", methods=["GET", "OPTIONS"])
+def list_salary_codes_alt():
+    """Alternative endpoint for listing salary codes"""
+    # Handle preflight OPTIONS request
+    if request.method == 'OPTIONS':
+        return '', 200
+
+    # Delegate to the main list function
+    return list_salary_codes()
 
 
 @salary_codes_bp.route("/", methods=["POST", "OPTIONS"])
@@ -267,9 +313,13 @@ def _generate_salary_code(site_name: str, rank: str, state: str) -> str:
         counter += 1
 
 
-@salary_codes_bp.route("/<salary_code>", methods=["GET"])
+@salary_codes_bp.route("/<salary_code>", methods=["GET", "OPTIONS"])
 def get_salary_code(salary_code):
     """Get salary code details"""
+    # Handle preflight OPTIONS request
+    if request.method == 'OPTIONS':
+        return '', 200
+
     try:
         wage = WageMaster.query.filter_by(salary_code=salary_code, is_active=True).first()
         if not wage:
