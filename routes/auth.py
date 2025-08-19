@@ -264,3 +264,88 @@ def logout(current_user):
         "success": True,
         "message": "Logged out successfully"
     }), 200
+
+# --- Added endpoints to match frontend expectations ---
+
+@auth_bp.route("/refresh", methods=["POST"])
+@token_required
+def refresh_token(current_user):
+    """Issue a new JWT for the current user"""
+    try:
+        token = generate_token(current_user)
+        return jsonify({
+            "success": True,
+            "message": "Token refreshed",
+            "data": {"token": token}
+        }), 200
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "message": f"Token refresh error: {str(e)}"
+        }), 500
+
+
+@auth_bp.route("/profile", methods=["PUT"])
+@token_required
+def update_profile(current_user):
+    """Update current user's profile"""
+    try:
+        data = request.get_json() or {}
+
+        # Allow limited fields to be updated
+        allowed_fields = ["name", "department", "profile_image"]
+        for field in allowed_fields:
+            if field in data:
+                setattr(current_user, field, data[field])
+
+        current_user.updated_by = data.get("updated_by", current_user.email)
+        db.session.commit()
+
+        return jsonify({
+            "success": True,
+            "message": "Profile updated successfully",
+            "data": current_user.to_dict()
+        }), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            "success": False,
+            "message": f"Profile update error: {str(e)}"
+        }), 500
+
+
+@auth_bp.route("/change-password", methods=["PUT"])
+@token_required
+def change_password(current_user):
+    """Change current user's password"""
+    try:
+        data = request.get_json() or {}
+        current_password = data.get("currentPassword")
+        new_password = data.get("newPassword")
+
+        if not current_password or not new_password:
+            return jsonify({
+                "success": False,
+                "message": "Current password and new password are required"
+            }), 400
+
+        if not current_user.check_password(current_password):
+            return jsonify({
+                "success": False,
+                "message": "Current password is incorrect"
+            }), 400
+
+        current_user.set_password(new_password)
+        current_user.updated_by = current_user.email
+        db.session.commit()
+
+        return jsonify({
+            "success": True,
+            "message": "Password changed successfully"
+        }), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            "success": False,
+            "message": f"Password change error: {str(e)}"
+        }), 500

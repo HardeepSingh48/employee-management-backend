@@ -1,5 +1,6 @@
-from flask import Flask
+from flask import Flask, request, make_response
 from flask_cors import CORS
+from datetime import datetime
 from config import (
     SQLALCHEMY_DATABASE_URI,
     SQLALCHEMY_TRACK_MODIFICATIONS,
@@ -16,6 +17,8 @@ from routes.auth import auth_bp
 from routes.employee_dashboard import employee_dashboard_bp
 import os
 from config import UPLOADS_DIR
+from models.user import User
+from models.employee import Employee
 
 def create_app():
     app = Flask(__name__)
@@ -24,7 +27,7 @@ def create_app():
     app.url_map.strict_slashes = False
 
     # Enable CORS for all routes with specific configuration
-    # Allow your frontend domain in production
+    # Allow your frontend domain in production and development
     allowed_origins = [
         "http://localhost:3000",
         "http://localhost:3001",
@@ -35,12 +38,15 @@ def create_app():
     # Add your production frontend URL here when you deploy it
     # allowed_origins.append("https://your-frontend-domain.com")
 
+    # Configure CORS with more permissive settings for development/testing
     CORS(app,
          origins=allowed_origins,
          methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
-         allow_headers=["Content-Type", "Authorization", "X-Requested-With", "Accept", "Origin"],
+         allow_headers=["Content-Type", "Authorization", "X-Requested-With", "Accept", "Origin", "Access-Control-Allow-Origin"],
          supports_credentials=True,
-         expose_headers=["Content-Type", "Authorization"])
+         expose_headers=["Content-Type", "Authorization"],
+         send_wildcard=False,
+         automatic_options=True)
 
     app.config["SQLALCHEMY_DATABASE_URI"] = SQLALCHEMY_DATABASE_URI
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = SQLALCHEMY_TRACK_MODIFICATIONS
@@ -51,6 +57,61 @@ def create_app():
     os.makedirs(UPLOADS_DIR, exist_ok=True)
 
     db.init_app(app)
+
+    # Optionally seed demo users in production by setting SEED_DEMO_USERS=true
+    if os.getenv("SEED_DEMO_USERS", "").lower() == "true":
+        with app.app_context():
+            try:
+                # Admin user
+                admin = User.query.filter_by(email="admin@company.com").first()
+                if not admin:
+                    admin = User(
+                        email="admin@company.com",
+                        name="Admin User",
+                        role="admin",
+                        created_by="system"
+                    )
+                    admin.set_password("admin123")
+                    admin.set_permissions(["all"])  # full access
+                    db.session.add(admin)
+
+                # Employee user and minimal employee profile
+                employee_user = User.query.filter_by(email="employee@company.com").first()
+                if not employee_user:
+                    # Ensure an employee record exists
+                    demo_employee_id = "EMPDEMO001"
+                    employee = Employee.query.filter_by(employee_id=demo_employee_id).first()
+                    if not employee:
+                        employee = Employee(
+                            employee_id=demo_employee_id,
+                            first_name="Demo",
+                            last_name="Employee",
+                            email="employee@company.com",
+                            designation="Associate",
+                            employment_status="Active",
+                            created_by="system"
+                        )
+                        db.session.add(employee)
+
+                    employee_user = User(
+                        email="employee@company.com",
+                        name="Demo Employee",
+                        role="employee",
+                        employee_id=demo_employee_id,
+                        created_by="system"
+                    )
+                    employee_user.set_password("emp123")
+                    employee_user.set_permissions(["view_profile", "mark_attendance", "view_attendance"])
+                    db.session.add(employee_user)
+
+                db.session.commit()
+            except Exception as seed_err:
+                # Do not crash app on seed errors; log and continue
+                try:
+                    db.session.rollback()
+                except Exception:
+                    pass
+                print(f"[WARN] Demo user seeding failed: {seed_err}")
 
     # Register all blueprints
     app.register_blueprint(auth_bp, url_prefix="/api/auth")
@@ -67,6 +128,7 @@ def create_app():
         return {
             "message": "Employee Management System API",
             "version": "2.0",
+            "status": "running",
             "endpoints": {
                 "auth": "/api/auth",
                 "employee_dashboard": "/api/employee",
@@ -77,6 +139,13 @@ def create_app():
                 "salary": "/api/salary"
             }
         }
+
+    # Add health check route
+    @app.route("/health")
+    def health_check():
+        return {"status": "healthy", "timestamp": datetime.now().isoformat()}
+
+    # Rely on Flask-CORS for preflight handling to avoid conflicts with credentials
 
     return app
 
