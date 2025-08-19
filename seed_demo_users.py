@@ -91,7 +91,8 @@ def main() -> int:
     emp_email = os.getenv("EMP_EMAIL", "employee@company.com")
     emp_password = os.getenv("EMP_PASSWORD", "emp123")
 
-    app = create_app()
+    # Use minimal app without registering blueprints to avoid heavy imports (pandas)
+    app = create_app(register_blueprints=False)
     with app.app_context():
         try:
             upsert_admin(admin_email, admin_password)

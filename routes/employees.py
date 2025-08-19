@@ -1,6 +1,5 @@
 from flask import Blueprint, request, jsonify
 from services.employee_service import create_employee, bulk_import_from_frames, get_employee_by_id, get_all_employees, search_employees
-from utils.excel_parser import load_excel_to_frames
 from utils.upload import save_file
 
 employees_bp = Blueprint("employees", __name__)
@@ -112,6 +111,8 @@ def bulk_upload():
     Expected columns in every sheet:
       Full Name, Date of Birth, Gender, Site Name, Rank, State, Base Salary
     """
+    # Lazy import to avoid heavy pandas dependency during app startup or when running seed scripts
+    from utils.excel_parser import load_excel_to_frames
     file = request.files.get("file")
     if not file:
         return jsonify({"success": False, "message": "file is required"}), 400

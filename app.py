@@ -8,19 +8,12 @@ from config import (
     SECRET_KEY,
 )
 from models import db
-from routes.employees import employees_bp
-from routes.departments import departments_bp
-from routes.salary_codes import salary_codes_bp
-from routes.attendance import attendance_bp
-from routes.salary import salary_bp
-from routes.auth import auth_bp
-from routes.employee_dashboard import employee_dashboard_bp
 import os
 from config import UPLOADS_DIR
 from models.user import User
 from models.employee import Employee
 
-def create_app():
+def create_app(register_blueprints: bool = True):
     app = Flask(__name__)
 
     # Disable strict slashes to avoid redirect issues with CORS
@@ -113,14 +106,24 @@ def create_app():
                     pass
                 print(f"[WARN] Demo user seeding failed: {seed_err}")
 
-    # Register all blueprints
-    app.register_blueprint(auth_bp, url_prefix="/api/auth")
-    app.register_blueprint(employee_dashboard_bp, url_prefix="/api/employee")
-    app.register_blueprint(employees_bp, url_prefix="/api/employees")
-    app.register_blueprint(departments_bp, url_prefix="/api/departments")
-    app.register_blueprint(salary_codes_bp, url_prefix="/api/salary-codes")
-    app.register_blueprint(attendance_bp, url_prefix="/api/attendance")
-    app.register_blueprint(salary_bp, url_prefix="/api/salary")
+    # Register all blueprints (optional for scripts)
+    if register_blueprints:
+        # Import lazily to avoid importing heavy dependencies when not needed
+        from routes.auth import auth_bp
+        from routes.employee_dashboard import employee_dashboard_bp
+        from routes.employees import employees_bp
+        from routes.departments import departments_bp
+        from routes.salary_codes import salary_codes_bp
+        from routes.attendance import attendance_bp
+        from routes.salary import salary_bp
+
+        app.register_blueprint(auth_bp, url_prefix="/api/auth")
+        app.register_blueprint(employee_dashboard_bp, url_prefix="/api/employee")
+        app.register_blueprint(employees_bp, url_prefix="/api/employees")
+        app.register_blueprint(departments_bp, url_prefix="/api/departments")
+        app.register_blueprint(salary_codes_bp, url_prefix="/api/salary-codes")
+        app.register_blueprint(attendance_bp, url_prefix="/api/attendance")
+        app.register_blueprint(salary_bp, url_prefix="/api/salary")
 
     # Add a simple root route for testing
     @app.route("/")
@@ -149,7 +152,10 @@ def create_app():
 
     return app
 
-app = create_app()
+# Create the WSGI app when importing this module (needed for gunicorn),
+# but allow scripts to disable this by setting CREATE_APP_ON_IMPORT=0
+if os.getenv("CREATE_APP_ON_IMPORT", "1") not in ("0", "false", "False"):
+    app = create_app()
 
 if __name__ == "__main__":
     # For local development
