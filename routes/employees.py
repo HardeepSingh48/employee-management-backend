@@ -1,5 +1,7 @@
 from flask import Blueprint, request, jsonify
 from services.employee_service import create_employee, bulk_import_from_frames, get_employee_by_id, get_all_employees, search_employees
+from models import db
+from models.employee import Employee
 from utils.upload import save_file
 
 employees_bp = Blueprint("employees", __name__)
@@ -82,6 +84,23 @@ def register_employee():
 
     try:
         emp = create_employee(payload)
+
+        # Save uploaded documents if present (Aadhaar, PAN, Voter ID front/back, Passbook front)
+        saved_docs = {}
+        file_fields = [
+            "aadhaar_front", "aadhaar_back",
+            "pan_front", "pan_back",
+            "voter_front", "voter_back",
+            "passbook_front"
+        ]
+
+        for key in file_fields:
+            f = request.files.get(key)
+            if f:
+                path = save_file(f, subfolder=emp.employee_id)
+                if path:
+                    saved_docs[key] = path
+
         return jsonify({
             "success": True,
             "message": "Employee registered successfully",
@@ -93,7 +112,8 @@ def register_employee():
                 "phone_number": emp.phone_number,
                 "department_id": emp.department_id,
                 "designation": emp.designation,
-                "salary_code": emp.salary_code
+                "salary_code": emp.salary_code,
+                "documents": saved_docs
             }
         }), 201
     except Exception as e:
@@ -158,6 +178,49 @@ def get_employee(employee_id):
             }
         }), 200
     except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 400
+
+
+@employees_bp.route("/<employee_id>", methods=["PUT", "OPTIONS"])
+def update_employee(employee_id):
+    """Update an existing employee's basic details"""
+    if request.method == 'OPTIONS':
+        return '', 200
+
+    try:
+        emp = Employee.query.filter_by(employee_id=employee_id).first()
+        if not emp:
+            return jsonify({"success": False, "message": "Employee not found"}), 404
+
+        payload = request.get_json() if request.is_json else request.form.to_dict()
+
+        # Allow updating selected fields
+        allowed_fields = [
+            "first_name", "last_name", "email", "phone_number",
+            "department_id", "designation", "employment_status"
+        ]
+        for field in allowed_fields:
+            if field in payload and payload[field] is not None:
+                setattr(emp, field, payload[field])
+
+        db.session.commit()
+
+        return jsonify({
+            "success": True,
+            "message": "Employee updated successfully",
+            "data": {
+                "employee_id": emp.employee_id,
+                "first_name": emp.first_name,
+                "last_name": emp.last_name,
+                "email": emp.email,
+                "phone_number": emp.phone_number,
+                "department_id": emp.department_id,
+                "designation": emp.designation,
+                "employment_status": emp.employment_status
+            }
+        }), 200
+    except Exception as e:
+        db.session.rollback()
         return jsonify({"success": False, "message": str(e)}), 400
 
 

@@ -7,16 +7,17 @@ from datetime import datetime
 
 def _next_employee_id() -> str:
     """
-    EMP001-style generator based on highest existing employee_id numeric suffix.
+    Employee ID generator starting from 910001.
     """
     last = db.session.query(Employee).order_by(Employee.employee_id.desc()).first()
+
     if not last or not last.employee_id:
-        return "EMP001"
+        return "910001"
     try:
-        n = int(last.employee_id.replace("EMP", "")) + 1
+        n = int(last.employee_id) + 1
     except ValueError:
-        n = 1
-    return f"EMP{n:03d}"
+        n = 910001
+    return str(n)
 
 def _get_or_create_wage_master(site_name: str, rank: str, state: str, base_salary, skill_level="Skilled"):
     # Exact match

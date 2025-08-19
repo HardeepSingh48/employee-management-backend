@@ -14,7 +14,7 @@ class Employee(db.Model):
     address = db.Column(db.String(500))
     adhar_number = db.Column(db.String(20))
     place_of_birth = db.Column(db.String(100))
-    marital_status = db.Column(db.String(20), db.CheckConstraint("marital_status IN ('unmarried', 'married')"))
+    marital_status = db.Column(db.String(20), db.CheckConstraint("marital_status IN ('Single', 'Married', 'Divorced', 'Widowed')"))
     date_of_birth = db.Column(db.Date)
     email = db.Column(db.String(120))
     phone_number = db.Column(db.String(20))

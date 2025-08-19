@@ -1,0 +1,21 @@
+{
+  "name": "db-migration-project",
+  "version": "1.0.0",
+  "description": "A project for managing database migrations and seeding.",
+  "main": "src/scripts/migrate.ts",
+  "scripts": {
+    "migrate": "ts-node src/scripts/migrate.ts",
+    "rollback": "ts-node src/scripts/rollback.ts"
+  },
+  "dependencies": {
+    "pg": "^8.7.1",
+    "pg-hstore": "^2.3.4",
+    "sequelize": "^6.6.5"
+  },
+  "devDependencies": {
+    "ts-node": "^10.4.0",
+    "typescript": "^4.4.4"
+  },
+  "author": "",
+  "license": "ISC"
+}

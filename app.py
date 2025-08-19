@@ -161,4 +161,11 @@ if __name__ == "__main__":
     # For local development
     port = int(os.environ.get("PORT", 5000))
     debug = os.environ.get("FLASK_ENV") != "production"
+
+    # Ensure app exists even if CREATE_APP_ON_IMPORT disabled
+    try:
+        app
+    except NameError:
+        app = create_app()
+
     app.run(host="0.0.0.0", port=port, debug=debug)
