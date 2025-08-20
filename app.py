@@ -26,7 +26,7 @@ def create_app(register_blueprints: bool = True):
         "http://localhost:3001",
         "http://127.0.0.1:3000",
         "http://127.0.0.1:3001",
-        "https://employee-management-frontend-n8xnn5hpw-pluraproductionsaas.vercel.app"
+        "https://employee-management-frontend-kohl-eight.vercel.app"
     ]
 
     # Add your production frontend URL here when you deploy it
@@ -117,6 +117,7 @@ def create_app(register_blueprints: bool = True):
         from routes.salary_codes import salary_codes_bp
         from routes.attendance import attendance_bp
         from routes.salary import salary_bp
+        from routes.forms import forms_bp
 
         app.register_blueprint(auth_bp, url_prefix="/api/auth")
         app.register_blueprint(employee_dashboard_bp, url_prefix="/api/employee")
@@ -125,6 +126,7 @@ def create_app(register_blueprints: bool = True):
         app.register_blueprint(salary_codes_bp, url_prefix="/api/salary-codes")
         app.register_blueprint(attendance_bp, url_prefix="/api/attendance")
         app.register_blueprint(salary_bp, url_prefix="/api/salary")
+        app.register_blueprint(forms_bp, url_prefix="/api/forms")
 
     # Add a simple root route for testing
     @app.route("/")
