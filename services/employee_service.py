@@ -5,19 +5,19 @@ from models.wage_master import WageMaster
 from models.account_details import AccountDetails
 from datetime import datetime
 
-def _next_employee_id() -> str:
-    """
-    Employee ID generator starting from 910001.
-    """
-    last = db.session.query(Employee).order_by(Employee.employee_id.desc()).first()
+# def _next_employee_id() -> str:
+#     """
+#     Employee ID generator starting from 910001.
+#     """
+#     last = db.session.query(Employee).order_by(Employee.employee_id.desc()).first()
 
-    if not last or not last.employee_id:
-        return "910001"
-    try:
-        n = int(last.employee_id) + 1
-    except ValueError:
-        n = 910001
-    return str(n)
+#     if not last or not last.employee_id:
+#         return "910001"
+#     try:
+#         n = int(last.employee_id) + 1
+#     except ValueError:
+#         n = 910001
+#     return str(n)
 
 def _get_or_create_wage_master(site_name: str, rank: str, state: str, base_salary, skill_level="Skilled"):
     # Exact match
@@ -99,7 +99,7 @@ def create_employee(payload: dict) -> Employee:
     hire_date = _parse_date(payload.get("hire_date") or payload.get("date_of_joining"))
 
     emp = Employee(
-        employee_id=_next_employee_id(),
+        # employee_id=_next_employee_id(),
         first_name=payload.get("first_name", ""),
         last_name=payload.get("last_name", ""),
         father_name=payload.get("father_name"),
@@ -256,7 +256,7 @@ def pd_to_date(v):
         return None
 
 
-def get_employee_by_id(employee_id: str) -> Employee:
+def get_employee_by_id(employee_id: int) -> Employee:
     """Get employee by employee ID"""
     return Employee.query.filter_by(employee_id=employee_id).first()
 
@@ -280,7 +280,7 @@ def search_employees(search_term: str = "", department: str = None, employment_s
             db.or_(
                 Employee.first_name.ilike(search_filter),
                 Employee.last_name.ilike(search_filter),
-                Employee.employee_id.ilike(search_filter),
+                Employee.employee_id.cast(db.String).ilike(search_filter),
                 Employee.email.ilike(search_filter)
             )
         )

@@ -1,11 +1,18 @@
 from models import db
 from sqlalchemy.sql import func
+from sqlalchemy import Sequence
 
 class Employee(db.Model):
     __tablename__ = "employees"
 
-    id = db.Column(db.Integer, primary_key=True)
-    employee_id = db.Column(db.String(50), unique=True, nullable=False)
+    # id = db.Column(db.Integer, primary_key=True)
+    employee_id = db.Column(
+    db.Integer,
+    Sequence('employee_id_seq', start=910001, increment=1),
+    primary_key=True,
+    unique=True,
+    nullable=False
+)
 
     # Personal Information
     first_name = db.Column(db.String(100), nullable=False)

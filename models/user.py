@@ -16,7 +16,7 @@ class User(db.Model):
     __tablename__ = "users"
 
     id = db.Column(db.String(50), primary_key=True, default=lambda: str(uuid.uuid4()))
-    employee_id = db.Column(db.String(50), db.ForeignKey("employees.employee_id"), nullable=True)
+    employee_id = db.Column(db.Integer, db.ForeignKey("employees.employee_id"), nullable=True)
     
     # Authentication fields
     email = db.Column(db.String(120), unique=True, nullable=False)

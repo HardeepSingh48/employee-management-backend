@@ -7,7 +7,7 @@ class Attendance(db.Model):
     __tablename__ = "attendance"
 
     attendance_id = db.Column(db.String(50), primary_key=True, default=lambda: str(uuid.uuid4()))
-    employee_id = db.Column(db.String(50), db.ForeignKey("employees.employee_id"), nullable=False)
+    employee_id = db.Column(db.Integer, db.ForeignKey("employees.employee_id"), nullable=False)
     attendance_date = db.Column(db.Date, nullable=False)
     check_in_time = db.Column(db.DateTime)
     check_out_time = db.Column(db.DateTime)

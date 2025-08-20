@@ -5,7 +5,7 @@ class AccountDetails(db.Model):
     __tablename__ = "account_details"
 
     id = db.Column(db.Integer, primary_key=True)
-    emp_id = db.Column(db.String(50), db.ForeignKey("employees.employee_id"), nullable=False)
+    emp_id = db.Column(db.Integer, db.ForeignKey('employees.employee_id'), nullable=False)
     account_number = db.Column(db.String(50), nullable=False)
     ifsc_code = db.Column(db.String(20), nullable=False)
     bank_name = db.Column(db.String(100))
