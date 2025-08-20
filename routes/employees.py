@@ -3,6 +3,8 @@ from services.employee_service import create_employee, bulk_import_from_frames, 
 from models import db
 from models.employee import Employee
 from utils.upload import save_file
+from models.account_details import AccountDetails
+
 
 employees_bp = Blueprint("employees", __name__)
 
@@ -157,6 +159,9 @@ def get_employee(employee_id):
         if not employee:
             return jsonify({"success": False, "message": "Employee not found"}), 404
 
+         # Fetch account details (one-to-one relation)
+        account = AccountDetails.query.filter_by(emp_id=employee.employee_id).first()
+
         return jsonify({
             "success": True,
             "data": {
@@ -174,7 +179,35 @@ def get_employee(employee_id):
                 "employment_status": employee.employment_status,
                 "salary_code": employee.salary_code,
                 "base_salary": employee.base_salary,
-                "created_date": employee.created_date.isoformat() if employee.created_date else None
+                "created_date": employee.created_date.isoformat() if employee.created_date else None,
+                "adhar_number": employee.adhar_number,
+                "alternate_contact_number": employee.alternate_contact_number,
+                "blood_group": employee.blood_group,
+                "emergency_contact_name": employee.emergency_contact_name,
+                "emergency_contact_phone": employee.emergency_contact_phone,
+                "emergency_contact_relationship": employee.emergency_contact_relationship,
+                "esic_number": employee.esic_number,
+                "experience_duration": employee.experience_duration,
+                "gender": employee.gender,
+                "highest_qualification": employee.highest_qualification,
+                "marital_status": employee.marital_status,
+                "nationality": employee.nationality,
+                "pan_card_number": employee.pan_card_number,
+                "pf_applicability": employee.pf_applicability,
+                "professional_tax_applicability": employee.professional_tax_applicability,
+                "reporting_manager": employee.reporting_manager,
+                "salary_advance_loan": employee.salary_advance_loan,
+                "skill_category": employee.skill_category,
+                "uan": employee.uan,
+                "voter_id_driving_license": employee.voter_id_driving_license,
+                "work_location": employee.work_location,
+                "year_of_passing": employee.year_of_passing,
+
+                # ✅ Include account details safely
+                "bank_account_number": account.account_number if account else None,
+                "bank_name": account.bank_name if account else None,
+                "ifsc_code": account.ifsc_code if account else None,
+                "branch_name": account.branch_name if account else None,
             }
         }), 200
     except Exception as e:
