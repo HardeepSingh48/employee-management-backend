@@ -127,11 +127,32 @@ def login():
                 'salary_code': user.employee.salary_code
             }
         
+        # Safe user data creation
+        try:
+            user_data = user.to_dict()
+        except Exception as e:
+            print(f"Error in to_dict(): {e}")
+            # Fallback user data
+            user_data = {
+                'id': user.id,
+                'employee_id': user.employee_id,
+                'email': user.email,
+                'name': getattr(user, 'name', 'Unknown User'),
+                'role': user.role,
+                'is_active': user.is_active,
+                'is_verified': user.is_verified,
+                'permissions': user.get_permissions(),
+                'last_login': user.last_login.isoformat() if user.last_login else None,
+                'profile_image': user.profile_image,
+                'department': user.department,
+                'created_date': user.created_date.isoformat() if user.created_date else None
+            }
+        
         return jsonify({
             "success": True,
             "message": "Login successful",
             "data": {
-                "user": user.to_dict(),
+                "user": user_data,
                 "employee": employee_data,
                 "token": token
             }
@@ -265,87 +286,51 @@ def logout(current_user):
         "message": "Logged out successfully"
     }), 200
 
-# --- Added endpoints to match frontend expectations ---
-
-@auth_bp.route("/refresh", methods=["POST"])
+@auth_bp.route("/assign-supervisor", methods=["POST"])
 @token_required
-def refresh_token(current_user):
-    """Issue a new JWT for the current user"""
+def assign_supervisor(current_user):
+    """Assign a user as supervisor to a site (admin only)"""
+    if current_user.role != 'admin':
+        return jsonify({"success": False, "message": "Unauthorized"}), 403
+    
     try:
-        token = generate_token(current_user)
-        return jsonify({
-            "success": True,
-            "message": "Token refreshed",
-            "data": {"token": token}
-        }), 200
-    except Exception as e:
-        return jsonify({
-            "success": False,
-            "message": f"Token refresh error: {str(e)}"
-        }), 500
-
-
-@auth_bp.route("/profile", methods=["PUT"])
-@token_required
-def update_profile(current_user):
-    """Update current user's profile"""
-    try:
-        data = request.get_json() or {}
-
-        # Allow limited fields to be updated
-        allowed_fields = ["name", "department", "profile_image"]
-        for field in allowed_fields:
-            if field in data:
-                setattr(current_user, field, data[field])
-
-        current_user.updated_by = data.get("updated_by", current_user.email)
+        data = request.get_json()
+        user = User.query.get(data['user_id'])
+        
+        if not user:
+            return jsonify({"success": False, "message": "User not found"}), 404
+        
+        user.role = 'supervisor'
+        user.site_id = data['site_id']
+        user.updated_by = current_user.email
         db.session.commit()
-
+        
         return jsonify({
             "success": True,
-            "message": "Profile updated successfully",
-            "data": current_user.to_dict()
+            "message": "Supervisor assigned successfully"
         }), 200
     except Exception as e:
         db.session.rollback()
         return jsonify({
             "success": False,
-            "message": f"Profile update error: {str(e)}"
+            "message": str(e)
         }), 500
 
-
-@auth_bp.route("/change-password", methods=["PUT"])
+@auth_bp.route("/supervisors", methods=["GET"])
 @token_required
-def change_password(current_user):
-    """Change current user's password"""
+def get_supervisors(current_user):
+    """Get all supervisors (admin only)"""
+    if current_user.role != 'admin':
+        return jsonify({"success": False, "message": "Unauthorized"}), 403
+    
     try:
-        data = request.get_json() or {}
-        current_password = data.get("currentPassword")
-        new_password = data.get("newPassword")
-
-        if not current_password or not new_password:
-            return jsonify({
-                "success": False,
-                "message": "Current password and new password are required"
-            }), 400
-
-        if not current_user.check_password(current_password):
-            return jsonify({
-                "success": False,
-                "message": "Current password is incorrect"
-            }), 400
-
-        current_user.set_password(new_password)
-        current_user.updated_by = current_user.email
-        db.session.commit()
-
+        supervisors = User.query.filter_by(role='supervisor').all()
         return jsonify({
             "success": True,
-            "message": "Password changed successfully"
+            "data": [user.to_dict() for user in supervisors]
         }), 200
     except Exception as e:
-        db.session.rollback()
         return jsonify({
             "success": False,
-            "message": f"Password change error: {str(e)}"
+            "message": str(e)
         }), 500

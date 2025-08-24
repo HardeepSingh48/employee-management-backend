@@ -4,7 +4,7 @@ from models import db
 from models.employee import Employee
 from utils.upload import save_file
 from models.account_details import AccountDetails
-
+from routes.auth import token_required
 
 employees_bp = Blueprint("employees", __name__)
 
@@ -259,14 +259,22 @@ def update_employee(employee_id):
 
 @employees_bp.route("/", methods=["GET", "OPTIONS"])
 @employees_bp.route("/list", methods=["GET", "OPTIONS"])
-def list_employees():
-    """List all employees with pagination"""
+@token_required  # Add this decorator
+def list_employees(current_user):  # Add current_user parameter
+    """List employees based on user role"""
     try:
         page = int(request.args.get('page', 1))
         per_page = int(request.args.get('per_page', 10))
-
-        employees = get_all_employees(page=page, per_page=per_page)
-
+        
+        # Filter employees based on user role
+        if current_user.role == 'supervisor':
+            # Supervisor can only see employees from their site
+            employees = Employee.query.filter_by(site_id=current_user.site_id)\
+                                    .paginate(page=page, per_page=per_page, error_out=False)
+        else:
+            # Admin/HR can see all employees
+            employees = get_all_employees(page=page, per_page=per_page)
+        
         employee_list = []
         for emp in employees.items:
             employee_list.append({
@@ -278,6 +286,7 @@ def list_employees():
                 "department_id": emp.department_id,
                 "designation": emp.designation,
                 "employment_status": emp.employment_status,
+                "site_id": emp.site_id,
                 "hire_date": emp.hire_date.isoformat() if emp.hire_date else None
             })
 
@@ -293,7 +302,6 @@ def list_employees():
         }), 200
     except Exception as e:
         return jsonify({"success": False, "message": str(e)}), 400
-
 
 @employees_bp.route("/all", methods=["GET", "OPTIONS"])
 def get_all_employees_simple():

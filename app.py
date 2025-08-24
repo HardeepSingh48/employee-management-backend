@@ -12,6 +12,8 @@ import os
 from config import UPLOADS_DIR
 from models.user import User
 from models.employee import Employee
+from flask_migrate import Migrate
+from models.site import Site
 
 def create_app(register_blueprints: bool = True):
     app = Flask(__name__)
@@ -51,6 +53,8 @@ def create_app(register_blueprints: bool = True):
     os.makedirs(UPLOADS_DIR, exist_ok=True)
 
     db.init_app(app)
+
+    migrate = Migrate(app, db)
 
     # Optionally seed demo users in production by setting SEED_DEMO_USERS=true
     if os.getenv("SEED_DEMO_USERS", "").lower() == "true":
@@ -118,6 +122,7 @@ def create_app(register_blueprints: bool = True):
         from routes.attendance import attendance_bp
         from routes.salary import salary_bp
         from routes.forms import forms_bp
+        from routes.sites import sites_bp
 
         app.register_blueprint(auth_bp, url_prefix="/api/auth")
         app.register_blueprint(employee_dashboard_bp, url_prefix="/api/employee")
@@ -127,6 +132,7 @@ def create_app(register_blueprints: bool = True):
         app.register_blueprint(attendance_bp, url_prefix="/api/attendance")
         app.register_blueprint(salary_bp, url_prefix="/api/salary")
         app.register_blueprint(forms_bp, url_prefix="/api/forms")
+        app.register_blueprint(sites_bp, url_prefix="/api/sites")
 
     # Add a simple root route for testing
     @app.route("/")

@@ -12,6 +12,11 @@ try:
 except ImportError:
     db = SQLAlchemy()
 
+try:
+    from models.site import Site
+except ImportError:
+    Site = None  # Handle case where Site model doesn't exist yet
+
 class User(db.Model):
     __tablename__ = "users"
 
@@ -23,10 +28,10 @@ class User(db.Model):
     password_hash = db.Column(db.String(255), nullable=False)
     
     # User details
-    name = db.Column(db.String(200), nullable=False)
+
     role = db.Column(db.String(20), 
-                    db.CheckConstraint("role IN ('admin', 'hr', 'manager', 'employee')"), 
-                    nullable=False, default='employee')
+            db.CheckConstraint("role IN ('admin', 'hr', 'manager', 'employee', 'supervisor')"), 
+            nullable=False, default='employee')
     
     # Status and permissions
     is_active = db.Column(db.Boolean, default=True)
@@ -48,8 +53,14 @@ class User(db.Model):
     updated_date = db.Column(db.DateTime, onupdate=func.now())
     updated_by = db.Column(db.String(100))
 
+    site_id = db.Column(db.String(50), db.ForeignKey('sites.site_id'), nullable=True)
+
     # Relationships
     employee = db.relationship("Employee", backref="user_account", foreign_keys=[employee_id])
+
+    # Add this relationship only if Site model exists
+    if 'Site' in globals():
+        site = db.relationship("Site", backref="supervisors", foreign_keys=[site_id])
 
     def set_password(self, password):
         """Set password hash"""

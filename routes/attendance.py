@@ -2,6 +2,9 @@ from flask import Blueprint, request, jsonify
 from services.attendance_service import AttendanceService
 from datetime import datetime, date
 import json
+import pandas as pd
+from io import BytesIO
+from routes.auth import token_required
 
 attendance_bp = Blueprint("attendance", __name__)
 
@@ -286,4 +289,150 @@ def get_today_attendance():
         return jsonify({
             "success": False,
             "message": f"Error fetching today's attendance: {str(e)}"
+        }), 500
+
+
+@attendance_bp.route("/bulk-upload", methods=["POST"])
+@token_required
+def bulk_upload_attendance(current_user):
+    """Bulk upload attendance via Excel file (supervisor only)"""
+    if current_user.role not in ['supervisor', 'admin']:
+        return jsonify({"success": False, "message": "Unauthorized"}), 403
+    
+    if 'file' not in request.files:
+        return jsonify({"success": False, "message": "No file uploaded"}), 400
+    
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({"success": False, "message": "No file selected"}), 400
+    
+    try:
+        # Read Excel file
+        df = pd.read_excel(BytesIO(file.read()))
+        
+        # Validate required columns
+        required_columns = ['Employee ID', 'Employee Name']
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        if missing_columns:
+            return jsonify({
+                "success": False, 
+                "message": f"Missing required columns: {', '.join(missing_columns)}"
+            }), 400
+        
+        # Process attendance data
+        results = {
+            "processed": 0,
+            "successful": 0,
+            "failed": 0,
+            "errors": []
+        }
+        
+        for _, row in df.iterrows():
+            try:
+                employee_id = row['Employee ID']
+                
+                # Check if employee exists and belongs to supervisor's site
+                employee = Employee.query.filter_by(employee_id=employee_id).first()
+                if not employee:
+                    results["errors"].append(f"Employee {employee_id} not found")
+                    results["failed"] += 1
+                    continue
+                
+                # For supervisors, check if employee belongs to their site
+                if current_user.role == 'supervisor' and employee.site_id != current_user.site_id:
+                    results["errors"].append(f"Employee {employee_id} not in your site")
+                    results["failed"] += 1
+                    continue
+                
+                # Process attendance for each day column
+                for col in df.columns:
+                    if col.startswith(('Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday')):
+                        if pd.notna(row[col]) and row[col] != '':
+                            # Extract date from column name and create attendance record
+                            attendance_status = str(row[col]).strip()
+                            
+                            # You'll need to implement date parsing logic based on your Excel format
+                            # For now, using today's date as example
+                            attendance_date = date.today()
+                            
+                            # Check if attendance already exists
+                            existing = Attendance.query.filter_by(
+                                employee_id=employee.employee_id,
+                                attendance_date=attendance_date
+                            ).first()
+                            
+                            if not existing:
+                                attendance = Attendance(
+                                    employee_id=employee.employee_id,
+                                    attendance_date=attendance_date,
+                                    attendance_status=attendance_status,
+                                    marked_by='supervisor',
+                                    created_by=current_user.email
+                                )
+                                db.session.add(attendance)
+                
+                results["successful"] += 1
+                results["processed"] += 1
+                
+            except Exception as e:
+                results["errors"].append(f"Error processing employee {row.get('Employee ID', 'Unknown')}: {str(e)}")
+                results["failed"] += 1
+                results["processed"] += 1
+        
+        db.session.commit()
+        
+        return jsonify({
+            "success": True,
+            "message": "Bulk attendance upload completed",
+            "results": results
+        }), 200
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            "success": False,
+            "message": f"Error processing file: {str(e)}"
+        }), 500
+
+@attendance_bp.route("/template", methods=["GET"])
+@token_required
+def download_attendance_template(current_user):
+    """Download attendance template for supervisors"""
+    if current_user.role not in ['supervisor', 'admin']:
+        return jsonify({"success": False, "message": "Unauthorized"}), 403
+    
+    try:
+        # Get employees for the supervisor's site
+        if current_user.role == 'supervisor':
+            employees = Employee.query.filter_by(site_id=current_user.site_id).all()
+        else:
+            employees = Employee.query.all()
+        
+        # Create template data
+        template_data = []
+        for emp in employees:
+            template_data.append({
+                'Employee ID': emp.employee_id,
+                'Employee Name': f"{emp.first_name} {emp.last_name}",
+                'Site': emp.site_id or '',
+                'Monday 1': '',
+                'Tuesday 2': '',
+                'Wednesday 3': '',
+                'Thursday 4': '',
+                'Friday 5': '',
+                'Saturday 6': '',
+                'Sunday 7': '',
+                # Add more days as needed
+            })
+        
+        return jsonify({
+            "success": True,
+            "message": "Template data generated",
+            "data": template_data
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "message": str(e)
         }), 500

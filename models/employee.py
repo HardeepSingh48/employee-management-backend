@@ -71,6 +71,9 @@ class Employee(db.Model):
 
     # FK to wage master (salary code)
     salary_code = db.Column(db.String(50), db.ForeignKey("wage_masters.salary_code"), nullable=True)
+    #Site ID
+    site_id = db.Column(db.String(50), db.ForeignKey('sites.site_id'), nullable=True)
+
 
     # Audit fields
     created_date = db.Column(db.Date, server_default=func.current_date())
