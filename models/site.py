@@ -1,5 +1,5 @@
 from models import db
-from sqlalchemy.sql import func
+from datetime import datetime
 
 class Site(db.Model):
     __tablename__ = 'sites'
@@ -7,13 +7,11 @@ class Site(db.Model):
     site_id = db.Column(db.String(50), primary_key=True)
     site_name = db.Column(db.String(200), nullable=False)
     location = db.Column(db.String(500))
-    state = db.Column(db.String(100))
+    state = db.Column(db.String(100), nullable=False)
     is_active = db.Column(db.Boolean, default=True)
-    
-    # Audit fields
-    created_date = db.Column(db.Date, server_default=func.current_date())
+    created_date = db.Column(db.Date, default=datetime.utcnow().date)
     created_by = db.Column(db.String(100))
-    updated_date = db.Column(db.Date, onupdate=func.current_date())
+    updated_date = db.Column(db.Date)
     updated_by = db.Column(db.String(100))
     
     def to_dict(self):
@@ -23,7 +21,10 @@ class Site(db.Model):
             'location': self.location,
             'state': self.state,
             'is_active': self.is_active,
-            'created_date': self.created_date.isoformat() if self.created_date else None
+            'created_date': self.created_date.isoformat() if self.created_date else None,
+            'created_by': self.created_by,
+            'updated_date': self.updated_date.isoformat() if self.updated_date else None,
+            'updated_by': self.updated_by
         }
     
     def __repr__(self):

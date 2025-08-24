@@ -10,7 +10,8 @@ def validate_wage_master_data(data, validate_skill_level=False):
     errors = []
 
     # Required fields (skill_level is optional for salary code creation)
-    required_fields = ['site_name', 'rank', 'state', 'base_wage']
+    # Removed site_name as WageMaster is now independent of Site
+    required_fields = ['rank', 'state', 'base_wage']
     for field in required_fields:
         if not data.get(field):
             errors.append(f'{field} is required')
@@ -31,9 +32,6 @@ def validate_wage_master_data(data, validate_skill_level=False):
             errors.append('base_wage must be a valid number')
     
     # Validate string lengths
-    if data.get('site_name') and len(data['site_name']) > 100:
-        errors.append('site_name must be less than 100 characters')
-    
     if data.get('rank') and len(data['rank']) > 50:
         errors.append('rank must be less than 50 characters')
     
