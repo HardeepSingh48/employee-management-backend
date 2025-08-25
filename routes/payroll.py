@@ -371,7 +371,7 @@ def generate_payslips_css():
             display: flex;
             justify-content: space-between;
             margin-bottom: 6px;
-            gap: 2%;
+            margin: 0 1%;
         }
         
         .earnings, .deductions {
@@ -462,8 +462,7 @@ def generate_payslips_css():
         /* Print optimizations */
         @media print {
             body {
-                -webkit-print-color-adjust: exact;
-                print-color-adjust: exact;
+                /* Removed problematic print-color-adjust properties */
             }
             
             .payslip {
@@ -655,16 +654,24 @@ def generate_payroll(current_user):
             response.headers['Content-Disposition'] = f'attachment; filename="{filename.replace(".pdf", ".html")}"'
             return response
         
-        # Generate PDF
-        pdf_path = generate_pdf_from_html(html_content, filename)
-        
-        # Return PDF file
-        return send_file(
-            pdf_path,
-            as_attachment=True,
-            download_name=filename,
-            mimetype='application/pdf'
-        )
+        # Generate PDF with better error handling
+        try:
+            pdf_path = generate_pdf_from_html(html_content, filename)
+            
+            # Return PDF file
+            return send_file(
+                pdf_path,
+                as_attachment=True,
+                download_name=filename,
+                mimetype='application/pdf'
+            )
+        except Exception as pdf_error:
+            print(f"PDF generation error: {str(pdf_error)}")
+            # Return HTML as fallback
+            response = make_response(html_content)
+            response.headers['Content-Type'] = 'text/html'
+            response.headers['Content-Disposition'] = f'attachment; filename="{filename.replace(".pdf", ".html")}"'
+            return response
         
     except Exception as e:
         return jsonify({'success': False, 'message': 'Error generating payroll', 'error': str(e)}), 500
@@ -734,6 +741,32 @@ def test_payroll(current_user):
             employee.employee_id, current_date.year, current_date.month
         )
         
+        # Test PDF generation with a simple HTML
+        test_html = """
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <style>
+                body { font-family: Arial, sans-serif; }
+                .test { border: 1px solid black; padding: 20px; }
+            </style>
+        </head>
+        <body>
+            <div class="test">
+                <h1>Test PDF Generation</h1>
+                <p>This is a test to verify PDF generation is working.</p>
+            </div>
+        </body>
+        </html>
+        """
+        
+        pdf_test_result = "Not tested"
+        try:
+            pdf_path = generate_pdf_from_html(test_html, "test.pdf")
+            pdf_test_result = f"Success: {pdf_path}"
+        except Exception as pdf_e:
+            pdf_test_result = f"Failed: {str(pdf_e)}"
+        
         return jsonify({
             'success': True,
             'message': 'Payroll test completed',
@@ -741,7 +774,8 @@ def test_payroll(current_user):
                 'pdf_generator': PDF_GENERATOR,
                 'employee_id': employee.employee_id,
                 'employee_name': f"{employee.first_name} {employee.last_name}",
-                'salary_calculation': salary_result
+                'salary_calculation': salary_result,
+                'pdf_test': pdf_test_result
             }
         })
         

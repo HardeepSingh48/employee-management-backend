@@ -11,6 +11,8 @@ RUN apt-get update && apt-get install -y \
     shared-mime-info \
     gcc \
     postgresql-client \
+    python3-dev \
+    build-essential \
     && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
