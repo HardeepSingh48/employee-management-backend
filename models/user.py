@@ -99,7 +99,8 @@ class User(db.Model):
             'last_login': self.last_login.isoformat() if self.last_login else None,
             'profile_image': self.profile_image,
             'department': self.department,
-            'created_date': self.created_date.isoformat() if self.created_date else None
+            'created_date': self.created_date.isoformat() if self.created_date else None,
+            'site_id': self.site_id
         }
 
     def __repr__(self):

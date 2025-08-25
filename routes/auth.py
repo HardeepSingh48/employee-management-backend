@@ -130,6 +130,9 @@ def login():
         # Safe user data creation
         try:
             user_data = user.to_dict()
+            # Add site_id for supervisors
+            if user.role == 'supervisor':
+                user_data['site_id'] = user.site_id
         except Exception as e:
             print(f"Error in to_dict(): {e}")
             # Fallback user data
@@ -147,6 +150,9 @@ def login():
                 'department': user.department,
                 'created_date': user.created_date.isoformat() if user.created_date else None
             }
+            # Add site_id for supervisors
+            if user.role == 'supervisor':
+                user_data['site_id'] = user.site_id
         
         return jsonify({
             "success": True,

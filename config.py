@@ -12,6 +12,7 @@ DB_NAME = os.getenv("DB_NAME", "sspl_db")
 SQLALCHEMY_DATABASE_URI = (
     DATABASE_URL
     or f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+    or "postgresql://employee_management_db_zwaz_user:iJCGc6DAulfzuW758GB3L2yMJOYUPtWY@dpg-d2hl5j24d50c739hsm30-a.singapore-postgres.render.com/employee_management_db_zwaz"
 )
 SQLALCHEMY_TRACK_MODIFICATIONS = False
 

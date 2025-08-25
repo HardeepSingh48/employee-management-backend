@@ -73,7 +73,7 @@ def get_form_b_data():
             overtime_hours = 0
             if attendance_summary['success']:
                 present_days = attendance_summary['data'].get('present_days', 0)
-                overtime_hours = attendance_summary['data'].get('overtime_hours', 0)
+                overtime_hours = attendance_summary['data'].get('total_overtime_hours', 0)
             
             # Calculate overtime amount (assuming 1.5x rate for overtime)
             daily_wage = salary_data.get('Daily Wage', 0)

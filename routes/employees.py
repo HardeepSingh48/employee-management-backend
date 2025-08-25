@@ -370,3 +370,39 @@ def search_employee():
         }), 200
     except Exception as e:
         return jsonify({"success": False, "message": str(e)}), 400
+
+@employees_bp.route("/site_employees", methods=["GET"])
+@token_required
+def get_site_employees(current_user):
+    """Get employees for a specific site (supervisor only)"""
+    if current_user.role != 'supervisor':
+        return jsonify({"success": False, "message": "Unauthorized"}), 403
+    
+    try:
+        if not current_user.site_id:
+            return jsonify({"success": False, "message": "Supervisor not assigned to any site"}), 400
+        
+        employees = Employee.query.filter_by(site_id=current_user.site_id).all()
+        
+        employee_list = []
+        for emp in employees:
+            employee_list.append({
+                "employee_id": emp.employee_id,
+                "first_name": emp.first_name,
+                "last_name": emp.last_name,
+                "full_name": f"{emp.first_name} {emp.last_name}",
+                "email": emp.email,
+                "phone_number": emp.phone_number,
+                "department_id": emp.department_id,
+                "designation": emp.designation,
+                "employment_status": emp.employment_status,
+                "site_id": emp.site_id
+            })
+
+        return jsonify({
+            "success": True,
+            "data": employee_list,
+            "count": len(employee_list)
+        }), 200
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 400
