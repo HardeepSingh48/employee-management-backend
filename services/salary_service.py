@@ -115,7 +115,7 @@ class SalaryService:
                 df = pd.merge(df, adj, on='Employee ID', how='left')
 
             # Ensure all expected columns exist (your exact logic)
-            earnings_cols = ['Special Basic', 'DA', 'HRA', 'Overtime', 'Others']
+            earnings_cols = ['Special Basic', 'DA', 'HRA', 'Overtime', 'Overtime Allowance', 'Others']
             deduction_cols = ['Society', 'Income Tax', 'Insurance', 'Others Recoveries']
             for col in earnings_cols + deduction_cols:
                 if col not in df.columns:
@@ -235,7 +235,7 @@ class SalaryService:
             df[['Present Days', 'Daily Wage', 'Basic', 'PF', 'ESIC']] = df.apply(calculate_simplified, axis=1)
 
             # Add default values for earnings and deductions
-            earnings_cols = ['Special Basic', 'DA', 'HRA', 'Overtime', 'Others']
+            earnings_cols = ['Special Basic', 'DA', 'HRA', 'Overtime', 'Overtime Allowance', 'Others']
             deduction_cols = ['Society', 'Income Tax', 'Insurance', 'Others Recoveries']
             for col in earnings_cols + deduction_cols:
                 df[col] = 0
@@ -290,6 +290,7 @@ class SalaryService:
 
             # Calculate using your logic with employee's salary code
             days_present = summary_data['present_days']
+            overtime_hours = summary_data.get('total_overtime_hours', 0)  # Get overtime hours
 
             # Get daily wage from employee's salary code
             daily_wage = SalaryService.get_employee_daily_wage(employee_id)
@@ -305,6 +306,10 @@ class SalaryService:
             basic = days_present * daily_wage
             pf = 0.12 * min(basic, 15000)
             esic = 0.0075 * min(basic, 21000)
+            
+            # Calculate Overtime Allowance (OTA) - same as Form B logic
+            overtime_rate = daily_wage / 8 * 1.5  # 1.5x hourly rate for overtime
+            overtime_allowance = overtime_hours * overtime_rate
 
             # Apply adjustments if provided
             special_basic = adjustments.get('Special Basic', 0) if adjustments else 0
@@ -318,7 +323,7 @@ class SalaryService:
             insurance = adjustments.get('Insurance', 0) if adjustments else 0
             others_recoveries = adjustments.get('Others Recoveries', 0) if adjustments else 0
 
-            total_earnings = basic + special_basic + da + hra + overtime + others_earnings
+            total_earnings = basic + special_basic + da + hra + overtime + overtime_allowance + others_earnings
             total_deductions = pf + esic + society + income_tax + insurance + others_recoveries
             
             # Get monthly deductions from the deductions module
@@ -340,6 +345,7 @@ class SalaryService:
                 'DA': da,
                 'HRA': hra,
                 'Overtime': overtime,
+                'Overtime Allowance': overtime_allowance,
                 'Others': others_earnings,
                 'Total Earnings': total_earnings,
                 'PF': pf,

@@ -124,6 +124,7 @@ def create_app(register_blueprints: bool = True):
         from routes.forms import forms_bp
         from routes.sites import sites_bp
         from routes.deductions import deductions_bp
+        from routes.payroll import payroll_bp
 
         app.register_blueprint(auth_bp, url_prefix="/api/auth")
         app.register_blueprint(employee_dashboard_bp, url_prefix="/api/employee")
@@ -135,6 +136,7 @@ def create_app(register_blueprints: bool = True):
         app.register_blueprint(forms_bp, url_prefix="/api/forms")
         app.register_blueprint(sites_bp, url_prefix="/api/sites")
         app.register_blueprint(deductions_bp, url_prefix="/api/deductions")
+        app.register_blueprint(payroll_bp, url_prefix="/api/payroll")
 
     # Add a simple root route for testing
     @app.route("/")

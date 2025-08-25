@@ -73,7 +73,7 @@ def get_form_b_data():
             # Get wage master details
             wage_master = WageMaster.query.filter_by(salary_code=employee.salary_code).first()
             
-            # Get attendance summary for the month
+            # Get attendance summary for the month - now OTA comes from salary service
             from services.attendance_service import AttendanceService
             attendance_summary = AttendanceService.get_monthly_attendance_summary(
                 employee.employee_id, year, month
@@ -85,10 +85,8 @@ def get_form_b_data():
                 present_days = attendance_summary['data'].get('present_days', 0)
                 overtime_hours = attendance_summary['data'].get('total_overtime_hours', 0)
             
-            # Calculate overtime amount (assuming 1.5x rate for overtime)
-            daily_wage = salary_data.get('Daily Wage', 0)
-            overtime_rate = daily_wage / 8 * 1.5  # Hourly overtime rate
-            overtime_amount = overtime_hours * overtime_rate
+            # Get overtime amount from salary service (no more redundant calculation)
+            overtime_amount = salary_data.get('Overtime Allowance', 0)
             
             # Map salary data to Form B structure
             form_b_row = {
@@ -97,7 +95,7 @@ def get_form_b_data():
                 "employeeName": f"{employee.first_name} {employee.last_name}",
                 "designation": employee.designation or "N/A",
                 "rateOfWage": {
-                    "bs": wage_master.base_wage if wage_master else daily_wage,
+                    "bs": wage_master.base_wage if wage_master else salary_data.get('Daily Wage', 0),
                     "da": 0  # DA component if available in adjustments
                 },
                 "daysWorked": present_days,
