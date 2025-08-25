@@ -9,3 +9,4 @@ from models.account_details import AccountDetails
 from models.wage_master import WageMaster
 from models.attendance import Attendance
 from models.user import User
+from models.deduction import Deduction

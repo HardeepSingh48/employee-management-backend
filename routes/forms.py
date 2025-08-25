@@ -3,6 +3,7 @@ from services.salary_service import SalaryService
 from models.employee import Employee
 from models.wage_master import WageMaster
 from models.attendance import Attendance
+from models.deduction import Deduction
 from models import db
 from datetime import datetime, date
 import pandas as pd
@@ -60,6 +61,15 @@ def get_form_b_data():
                 
             salary_data = salary_result['data']
             
+            # Get monthly deductions specifically for this employee
+            monthly_deduction_total, deduction_details = SalaryService.get_monthly_deductions(
+                employee.employee_id, year, month
+            )
+            
+            # Ensure monthly_deduction_total is always a valid number
+            if monthly_deduction_total is None or not isinstance(monthly_deduction_total, (int, float)):
+                monthly_deduction_total = 0
+            
             # Get wage master details
             wage_master = WageMaster.query.filter_by(salary_code=employee.salary_code).first()
             
@@ -108,6 +118,7 @@ def get_form_b_data():
                     "cit": salary_data.get('Income Tax', 0),
                     "ptax": 0,  # Professional tax
                     "adv": salary_data.get('Others Recoveries', 0),
+                    "otherRecoveries": monthly_deduction_total,  # New field for all deductions
                     "total": salary_data.get('Total Deductions', 0)
                 },
                 "netPayable": salary_data.get('Net Salary', 0),
@@ -123,6 +134,7 @@ def get_form_b_data():
             "totalOvertime": sum(row["overtime"] for row in form_b_data),
             "totalEarnings": sum(row["totalEarnings"] for row in form_b_data),
             "totalDeductions": sum(row["deductions"]["total"] for row in form_b_data),
+            "totalOtherRecoveries": sum(row["deductions"]["otherRecoveries"] or 0 for row in form_b_data),
             "totalNetPayable": sum(row["netPayable"] for row in form_b_data)
         }
 

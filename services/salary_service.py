@@ -3,6 +3,7 @@ from models.employee import Employee
 from models.attendance import Attendance
 from models.wage_master import WageMaster
 from models.holiday import Holiday
+from models.deduction import Deduction
 from datetime import datetime, date
 from sqlalchemy import and_, func
 import pandas as pd
@@ -45,6 +46,39 @@ class SalaryService:
         except Exception as e:
             print(f"Error getting wage for employee {employee_id}: {str(e)}")
             return 526.0  # Default to Un-Skilled rate
+
+    @staticmethod
+    def get_monthly_deductions(employee_id, year, month):
+        """
+        Get monthly deductions for an employee for a specific month
+        Returns (total_deduction, deduction_details_dict)
+        """
+        try:
+            # Get all active deductions for the employee
+            deductions = Deduction.query.filter_by(employee_id=employee_id).all()
+            
+            total_deduction = 0
+            deduction_details = {}
+            
+            for deduction in deductions:
+                # Check if deduction is active for the given month
+                if deduction.is_active_for_month(year, month):
+                    installment = deduction.get_installment_for_month(year, month)
+                    total_deduction += installment
+                    
+                    # Add to deduction details
+                    deduction_type = deduction.deduction_type
+                    if deduction_type in deduction_details:
+                        deduction_details[deduction_type] += installment
+                    else:
+                        deduction_details[deduction_type] = installment
+            
+            # Ensure we return numeric values
+            return float(total_deduction or 0), deduction_details
+            
+        except Exception as e:
+            print(f"Error getting deductions for employee {employee_id}: {str(e)}")
+            return 0.0, {}
 
     @staticmethod
     def calculate_salary_from_attendance_data(df, adjustments_df=None):
@@ -90,11 +124,33 @@ class SalaryService:
             # Calculate totals (your exact logic)
             df['Total Earnings'] = df[['Basic'] + earnings_cols].sum(axis=1)
             df['Total Deductions'] = df[['PF', 'ESIC'] + deduction_cols].sum(axis=1)
+            
+            # Add monthly deductions for each employee
+            for index, row in df.iterrows():
+                employee_id = str(row['Employee ID']).strip()
+                # Get current year and month from the data or use current date
+                current_date = datetime.now()
+                year = current_date.year
+                month = current_date.month
+                
+                monthly_deduction_total, deduction_details = SalaryService.get_monthly_deductions(employee_id, year, month)
+                df.at[index, 'Total Deductions'] += monthly_deduction_total
+                
+                # Add deduction details as separate columns
+                for deduction_type, amount in deduction_details.items():
+                    if deduction_type not in df.columns:
+                        df[deduction_type] = 0
+                    df.at[index, deduction_type] = amount
+            
             df['Net Salary'] = df['Total Earnings'] - df['Total Deductions']
 
-            # Final clean output (your exact logic)
+            # Final clean output (your exact logic) - include dynamic deduction columns
+            # Get all deduction types that exist in the dataframe
+            deduction_type_cols = [col for col in df.columns if col not in ['Employee ID', 'Employee Name', 'Skill Level', 'Present Days', 'Daily Wage', 'Basic'] + 
+                                 earnings_cols + ['Total Earnings', 'PF', 'ESIC'] + deduction_cols + ['Total Deductions', 'Net Salary']]
+            
             final_cols = ['Employee ID', 'Employee Name', 'Skill Level', 'Present Days', 'Daily Wage', 'Basic'] + \
-                         earnings_cols + ['Total Earnings', 'PF', 'ESIC'] + deduction_cols + \
+                         earnings_cols + ['Total Earnings', 'PF', 'ESIC'] + deduction_cols + deduction_type_cols + \
                          ['Total Deductions', 'Net Salary']
             output = df[final_cols].fillna(0).to_dict(orient='records')
 
@@ -264,6 +320,13 @@ class SalaryService:
 
             total_earnings = basic + special_basic + da + hra + overtime + others_earnings
             total_deductions = pf + esic + society + income_tax + insurance + others_recoveries
+            
+            # Get monthly deductions from the deductions module
+            monthly_deduction_total, deduction_details = SalaryService.get_monthly_deductions(employee_id, year, month)
+            
+            # Add monthly deductions to total deductions
+            total_deductions += monthly_deduction_total
+            
             net_salary = total_earnings - total_deductions
 
             result = {
@@ -288,6 +351,10 @@ class SalaryService:
                 'Total Deductions': total_deductions,
                 'Net Salary': net_salary
             }
+            
+            # Add deduction details to result (only if deductions exist)
+            for deduction_type, amount in deduction_details.items():
+                result[deduction_type] = amount
 
             return {
                 'success': True,
