@@ -23,7 +23,7 @@ pandas==1.5.3
 openpyxl==3.1.2
 xlrd==2.0.1
 
-# PDF generation
+# PDF generation (primary and fallback options)
 weasyprint==59.0
-pdfkit==1.0.0
 reportlab==4.0.4
+# pdfkit==1.0.0  # Commented out as it requires wkhtmltopdf which can be problematic
