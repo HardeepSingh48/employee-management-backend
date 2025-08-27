@@ -45,3 +45,5 @@ class Deduction(db.Model):
         if self.is_active_for_month(year, month):
             return self.monthly_installment()
         return 0
+
+

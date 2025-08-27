@@ -287,39 +287,41 @@ def generate_payslip_html(employee_data, year, month):
 
 
 def generate_payslips_css():
-    """Generate optimized CSS for payslip layout (3 per page)"""
+    """Generate server-compatible CSS for payslip layout (3 per page)"""
     return """
     <style>
         @page {
             size: A4;
-            margin: 0.3cm;
+            margin: 8mm;
         }
         
         body {
-            font-family: Arial, sans-serif;
+            font-family: 'DejaVu Sans', 'Liberation Sans', Arial, Helvetica, sans-serif !important;
             font-size: 10px;
             line-height: 1.2;
             margin: 0;
             padding: 0;
             color: #000;
+            background: white;
         }
         
         .payslip {
             width: 100%;
-            height: 31.5%;
-            margin-bottom: 0.4cm;
+            height: 31%;
+            margin-bottom: 4mm;
             border: 1.5px solid #000;
-            padding: 6px;
+            padding: 4mm;
             box-sizing: border-box;
             page-break-inside: avoid;
             background: white;
+            position: relative;
         }
         
         .payslip:last-child {
             margin-bottom: 0;
         }
         
-        /* Ensure exactly 3 payslips per page */
+        /* Force page breaks every 3 payslips */
         .payslip:nth-child(3n) {
             page-break-after: always;
             margin-bottom: 0;
@@ -332,8 +334,8 @@ def generate_payslips_css():
         .header {
             text-align: center;
             border-bottom: 1.5px solid #000;
-            margin-bottom: 6px;
-            padding-bottom: 3px;
+            margin-bottom: 3mm;
+            padding-bottom: 2mm;
         }
         
         .header h2 {
@@ -341,63 +343,82 @@ def generate_payslips_css():
             font-size: 13px;
             font-weight: bold;
             line-height: 1.1;
+            font-family: 'DejaVu Sans', Arial, sans-serif !important;
         }
         
         .header p {
-            margin: 1px 0 0 0;
+            margin: 1mm 0 0 0;
             font-size: 10px;
             font-weight: bold;
+            font-family: 'DejaVu Sans', Arial, sans-serif !important;
         }
         
         .employee-info {
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 6px;
+            width: 100%;
+            margin-bottom: 3mm;
             border-bottom: 1px solid #ccc;
-            padding-bottom: 4px;
+            padding-bottom: 2mm;
+            overflow: hidden;
         }
         
-        .left-info, .right-info {
+        .left-info {
             width: 48%;
+            float: left;
+        }
+        
+        .right-info {
+            width: 48%;
+            float: right;
         }
         
         .employee-info p {
-            margin: 1px 0;
+            margin: 0.5mm 0;
             font-size: 9px;
             line-height: 1.1;
+            font-family: 'DejaVu Sans', Arial, sans-serif !important;
         }
         
         .salary-details {
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 6px;
-            margin: 0 1%;
+            width: 100%;
+            margin-bottom: 3mm;
+            overflow: hidden;
         }
         
-        .earnings, .deductions {
-            width: 49%;
+        .earnings {
+            width: 48%;
+            float: left;
+            margin-right: 2%;
+        }
+        
+        .deductions {
+            width: 48%;
+            float: right;
+            margin-left: 2%;
         }
         
         .earnings h4, .deductions h4 {
-            margin: 0 0 3px 0;
+            margin: 0 0 2mm 0;
             font-size: 10px;
             text-align: center;
             background-color: #f0f0f0;
-            padding: 2px;
+            padding: 1mm;
             border: 1px solid #ccc;
             font-weight: bold;
+            font-family: 'DejaVu Sans', Arial, sans-serif !important;
         }
         
         .earnings table, .deductions table {
             width: 100%;
             border-collapse: collapse;
             font-size: 8px;
+            font-family: 'DejaVu Sans', Arial, sans-serif !important;
         }
         
         .earnings td, .deductions td {
-            padding: 1px 3px;
+            padding: 0.5mm 1mm;
             border: 1px solid #ccc;
             line-height: 1.1;
+            font-family: 'DejaVu Sans', Arial, sans-serif !important;
         }
         
         .earnings td:first-child, .deductions td:first-child {
@@ -414,43 +435,55 @@ def generate_payslips_css():
             background-color: #f0f0f0;
             font-weight: bold;
             font-size: 9px;
+            font-family: 'DejaVu Sans', Arial, sans-serif !important;
         }
         
         .net-salary {
             text-align: center;
-            margin-bottom: 6px;
+            margin-bottom: 3mm;
             border: 1.5px solid #000;
-            padding: 4px;
+            padding: 2mm;
             background-color: #f9f9f9;
+            clear: both;
         }
         
         .net-amount {
             font-size: 11px;
             font-weight: bold;
-            margin-bottom: 2px;
+            margin-bottom: 1mm;
             line-height: 1.1;
+            font-family: 'DejaVu Sans', Arial, sans-serif !important;
         }
         
         .amount-words {
             font-size: 8px;
             font-style: italic;
             line-height: 1.1;
+            font-family: 'DejaVu Sans', Arial, sans-serif !important;
         }
         
         .signature {
-            display: flex;
-            justify-content: space-between;
-            margin-top: 4px;
+            width: 100%;
+            margin-top: 2mm;
+            overflow: hidden;
         }
         
-        .employee-signature, .employer-signature {
+        .employee-signature {
             width: 45%;
+            float: left;
+            text-align: center;
+        }
+        
+        .employer-signature {
+            width: 45%;
+            float: right;
             text-align: center;
         }
         
         .signature p {
-            margin: 0 0 10px 0;
+            margin: 0 0 8mm 0;
             font-size: 8px;
+            font-family: 'DejaVu Sans', Arial, sans-serif !important;
         }
         
         .signature-line {
@@ -459,45 +492,54 @@ def generate_payslips_css():
             height: 1px;
         }
         
+        /* Clear floats */
+        .payslip::after,
+        .employee-info::after,
+        .salary-details::after,
+        .signature::after {
+            content: "";
+            display: table;
+            clear: both;
+        }
+        
         /* Print optimizations */
         @media print {
-            body {
-                /* Removed problematic print-color-adjust properties */
-            }
-            
             .payslip {
                 break-inside: avoid;
             }
-        }
-        
-        /* Responsive adjustments for smaller content */
-        .earnings table tr, .deductions table tr {
-            height: auto;
-            min-height: 12px;
-        }
-        
-        /* Ensure consistent spacing */
-        .earnings table td, .deductions table td {
-            vertical-align: middle;
-        }
-        
-        /* Handle long employee names */
-        .employee-info strong {
-            font-weight: bold;
-        }
-        
-        /* Compact layout for earnings/deductions with many items */
-        .earnings table, .deductions table {
-            table-layout: fixed;
-        }
-        
-        .earnings td, .deductions td {
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
+            
+            * {
+                font-family: 'DejaVu Sans', Arial, sans-serif !important;
+            }
         }
     </style>
     """
+
+def detect_server_environment():
+    """Detect if running in server environment and log details"""
+    import platform
+    import sys
+    
+    env_info = {
+        'platform': platform.platform(),
+        'python_version': sys.version,
+        'pdf_generator': PDF_GENERATOR,
+        'available_fonts': []
+    }
+    
+    # Try to detect available fonts
+    try:
+        import subprocess
+        result = subprocess.run(['fc-list'], capture_output=True, text=True, timeout=5)
+        if result.returncode == 0:
+            fonts = result.stdout.split('\n')[:10]  # First 10 fonts
+            env_info['available_fonts'] = fonts
+    except:
+        env_info['available_fonts'] = ['Font detection failed']
+    
+    logger.info(f"Server environment: {env_info}")
+    return env_info
+    
 
 
 def generate_pdf_from_html(html_content: str, filename: str) -> str:

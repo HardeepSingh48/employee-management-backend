@@ -345,3 +345,5 @@ def get_employee_deductions(employee_id):
             'success': False,
             'message': f'Error fetching employee deductions: {str(e)}'
         }), 500
+
+
