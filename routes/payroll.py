@@ -307,10 +307,10 @@ def generate_payslips_css():
         
         .payslip {
             width: 100%;
-            height: 31%;
-            margin-bottom: 4mm;
-            border: 1.5px solid #000;
-            padding: 4mm;
+            height: 32%;
+            margin-bottom: 2mm;
+            border: 1px solid #000;
+            padding: 2mm;
             box-sizing: border-box;
             page-break-inside: avoid;
             background: white;

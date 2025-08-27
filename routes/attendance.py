@@ -1,4 +1,4 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify,send_file
 from services.attendance_service import AttendanceService
 from models import db
 from models.employee import Employee
@@ -744,16 +744,58 @@ def download_attendance_template(current_user):
             template_data.append({
                 'Employee ID': emp.employee_id,
                 'Employee Name': f"{emp.first_name} {emp.last_name}",
-                'Site': emp.site_id or '',
+                'Skill Level': '',  # Add this column as it's expected in your file
                 '01/08/2025': '',
                 '02/08/2025': '',
                 '03/08/2025': '',
-                # Add more dates as needed
+                '04/08/2025': '',
+                '05/08/2025': '',
+                # Add more dates for the full month if needed
+                '06/08/2025': '',
+                '07/08/2025': '',
+                '08/08/2025': '',
+                '09/08/2025': '',
+                '10/08/2025': '',
+                '11/08/2025': '',
+                '12/08/2025': '',
+                '13/08/2025': '',
+                '14/08/2025': '',
+                '15/08/2025': '',
+                '16/08/2025': '',
+                '17/08/2025': '',
+                '18/08/2025': '',
+                '19/08/2025': '',
+                '20/08/2025': '',
+                '21/08/2025': '',
+                '22/08/2025': '',
+                '23/08/2025': '',
+                '24/08/2025': '',
+                '25/08/2025': '',
+                '26/08/2025': '',
+                '27/08/2025': '',
+                '28/08/2025': '',
+                '29/08/2025': '',
+                '30/08/2025': '',
+                '31/08/2025': '',
             })
         
         df = pd.DataFrame(template_data)
         output = BytesIO()
-        df.to_excel(output, index=False)
+        
+        # Use xlsxwriter engine for better compatibility
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df.to_excel(writer, index=False, sheet_name='Attendance')
+            
+            # Get the workbook and worksheet
+            workbook = writer.book
+            worksheet = writer.sheets['Attendance']
+            
+            # Auto-adjust column widths
+            for column in df:
+                column_length = max(df[column].astype(str).map(len).max(), len(column))
+                col_idx = df.columns.get_loc(column)
+                worksheet.column_dimensions[worksheet.cell(1, col_idx + 1).column_letter].width = min(column_length + 2, 20)
+        
         output.seek(0)
 
         return send_file(
@@ -764,9 +806,10 @@ def download_attendance_template(current_user):
         )
         
     except Exception as e:
+        logger.error(f"Error generating template: {str(e)}")
         return jsonify({
             "success": False,
-            "message": str(e)
+            "message": f"Error generating template: {str(e)}"
         }), 500
 
 @attendance_bp.route("/bulk-mark-excel", methods=["POST"])
