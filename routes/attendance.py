@@ -32,6 +32,10 @@ STATUS_MAP = {
     'Leave': 'Leave'
 }
 
+def round_to_half(x):
+    """Round to nearest 0.5 increment"""
+    return round(x * 2) / 2.0
+
 def normalize_attendance_value(value):
     """Normalize attendance value and return the mapped status"""
     if not value or pd.isna(value):
@@ -285,6 +289,24 @@ def mark_attendance(current_user):
         if data.get('check_out_time'):
             check_out_time = datetime.fromisoformat(data['check_out_time'].replace('Z', '+00:00'))
 
+        # Handle overtime data with backward compatibility
+        overtime_shifts = 0.0
+        
+        # Check for overtime_shifts first (new format)
+        if 'overtime_shifts' in data:
+            overtime_shifts = float(data['overtime_shifts'])
+        # Backward compatibility: if overtime_hours is present, convert to shifts
+        elif 'overtime_hours' in data:
+            overtime_hours = float(data['overtime_hours'])
+            overtime_shifts = round_to_half(overtime_hours / 8.0)
+        
+        # Validate overtime_shifts
+        if overtime_shifts < 0:
+            return jsonify({"success": False, "message": "Overtime shifts cannot be negative"}), 400
+        
+        # Round to nearest 0.5 if not already
+        overtime_shifts = round_to_half(overtime_shifts)
+        
         # Mark attendance
         result = AttendanceService.mark_attendance(
             employee_id=employee_id,
@@ -292,7 +314,7 @@ def mark_attendance(current_user):
             attendance_status=attendance_status,
             check_in_time=check_in_time,
             check_out_time=check_out_time,
-            overtime_hours=data.get('overtime_hours', 0.0),
+            overtime_shifts=overtime_shifts,
             remarks=data.get('remarks'),
             marked_by=marked_by
         )
@@ -339,7 +361,7 @@ def bulk_mark_attendance(current_user):
                         "message": f"Employee {record.get('employee_id')} not found or not in your site"
                     }), 403
 
-        # Process datetime fields for each record
+        # Process datetime fields and overtime data for each record
         for record in attendance_records:
             if record.get('check_in_time'):
                 record['check_in_time'] = datetime.fromisoformat(
@@ -350,6 +372,25 @@ def bulk_mark_attendance(current_user):
                 record['check_out_time'] = datetime.fromisoformat(
                     record['check_out_time'].replace('Z', '+00:00')
                 )
+            
+            # Handle overtime data with backward compatibility
+            overtime_shifts = 0.0
+            
+            # Check for overtime_shifts first (new format)
+            if 'overtime_shifts' in record:
+                overtime_shifts = float(record['overtime_shifts'])
+            # Backward compatibility: if overtime_hours is present, convert to shifts
+            elif 'overtime_hours' in record:
+                overtime_hours = float(record['overtime_hours'])
+                overtime_shifts = round_to_half(overtime_hours / 8.0)
+            
+            # Validate overtime_shifts
+            if overtime_shifts < 0:
+                return jsonify({"success": False, "message": f"Overtime shifts cannot be negative for employee {record.get('employee_id')}"}), 400
+            
+            # Round to nearest 0.5 if not already
+            overtime_shifts = round_to_half(overtime_shifts)
+            record['overtime_shifts'] = overtime_shifts
 
         result = AttendanceService.bulk_mark_attendance(attendance_records, marked_by)
 
@@ -444,6 +485,7 @@ def get_site_attendance(current_user):
                 'attendance_status': record.attendance_status,
                 'check_in_time': record.check_in_time.isoformat() if record.check_in_time else None,
                 'check_out_time': record.check_out_time.isoformat() if record.check_out_time else None,
+                'overtime_shifts': record.overtime_shifts,
                 'overtime_hours': record.overtime_hours,
                 'total_hours_worked': record.total_hours_worked,
                 'remarks': record.remarks,
@@ -590,6 +632,20 @@ def update_attendance(attendance_id):
             data['check_out_time'] = datetime.fromisoformat(
                 data['check_out_time'].replace('Z', '+00:00')
             )
+        
+        # Handle overtime data with backward compatibility
+        if 'overtime_shifts' in data:
+            overtime_shifts = float(data['overtime_shifts'])
+            if overtime_shifts < 0:
+                return jsonify({"success": False, "message": "Overtime shifts cannot be negative"}), 400
+            overtime_shifts = round_to_half(overtime_shifts)
+            data['overtime_shifts'] = overtime_shifts
+        elif 'overtime_hours' in data:
+            overtime_hours = float(data['overtime_hours'])
+            overtime_shifts = round_to_half(overtime_hours / 8.0)
+            data['overtime_shifts'] = overtime_shifts
+            # Remove overtime_hours from data to avoid confusion
+            data.pop('overtime_hours', None)
 
         result = AttendanceService.update_attendance(attendance_id, **data)
 

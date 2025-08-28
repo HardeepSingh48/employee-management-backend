@@ -47,3 +47,4 @@ class Deduction(db.Model):
         return 0
 
 
+

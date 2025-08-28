@@ -16,7 +16,7 @@ class Attendance(db.Model):
                                 default='Present')
 
     # Additional attendance fields
-    overtime_hours = db.Column(db.Float, default=0.0)
+    overtime_shifts = db.Column(db.Float, nullable=False, default=0.0)  # Changed from overtime_hours
     late_minutes = db.Column(db.Integer, default=0)
     early_departure_minutes = db.Column(db.Integer, default=0)
     total_hours_worked = db.Column(db.Float, default=8.0)
@@ -37,6 +37,11 @@ class Attendance(db.Model):
     # Relationship
     employee = db.relationship("Employee", backref="attendance_records")
 
+    @property
+    def overtime_hours(self):
+        """Computed property: convert overtime shifts to hours"""
+        return (self.overtime_shifts or 0.0) * 8
+
     def to_dict(self):
         """Convert attendance record to dictionary"""
         return {
@@ -46,7 +51,8 @@ class Attendance(db.Model):
             'check_in_time': self.check_in_time.isoformat() if self.check_in_time else None,
             'check_out_time': self.check_out_time.isoformat() if self.check_out_time else None,
             'attendance_status': self.attendance_status,
-            'overtime_hours': self.overtime_hours,
+            'overtime_shifts': self.overtime_shifts,
+            'overtime_hours': self.overtime_hours,  # Computed property
             'late_minutes': self.late_minutes,
             'early_departure_minutes': self.early_departure_minutes,
             'total_hours_worked': self.total_hours_worked,

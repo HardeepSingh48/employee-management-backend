@@ -12,7 +12,7 @@ class AttendanceService:
     @staticmethod
     def mark_attendance(employee_id, attendance_date, attendance_status, 
                        check_in_time=None, check_out_time=None, 
-                       overtime_hours=0.0, remarks=None, marked_by='employee'):
+                       overtime_shifts=0.0, remarks=None, marked_by='employee'):
         """
         Mark attendance for an employee on a specific date
         """
@@ -60,7 +60,7 @@ class AttendanceService:
                 check_in_time=check_in_time,
                 check_out_time=check_out_time,
                 attendance_status=attendance_status,
-                overtime_hours=overtime_hours,
+                overtime_shifts=overtime_shifts,
                 late_minutes=late_minutes,
                 total_hours_worked=total_hours_worked,
                 is_holiday=is_holiday_date,
@@ -102,7 +102,7 @@ class AttendanceService:
                 attendance_status=record.get('attendance_status', 'Present'),
                 check_in_time=record.get('check_in_time'),
                 check_out_time=record.get('check_out_time'),
-                overtime_hours=record.get('overtime_hours', 0.0),
+                overtime_shifts=record.get('overtime_shifts', 0.0),
                 remarks=record.get('remarks'),
                 marked_by=marked_by
             )
@@ -203,7 +203,8 @@ class AttendanceService:
             absent_days = len([r for r in attendance_records if r.attendance_status == 'Absent'])
             late_days = len([r for r in attendance_records if r.attendance_status == 'Late'])
             half_days = len([r for r in attendance_records if r.attendance_status == 'Half Day'])
-            total_overtime_hours = sum([r.overtime_hours or 0 for r in attendance_records])
+            total_overtime_shifts = sum([r.overtime_shifts or 0 for r in attendance_records])
+            total_overtime_hours = total_overtime_shifts * 8
             
             # Get holidays in the month
             holidays = Holiday.get_holidays_for_month(year, month)
@@ -229,6 +230,7 @@ class AttendanceService:
                     "absent_days": absent_days,
                     "late_days": late_days,
                     "half_days": half_days,
+                    "total_overtime_shifts": total_overtime_shifts,
                     "total_overtime_hours": total_overtime_hours,
                     "working_days": working_days,
                     "holiday_count": holiday_count,
@@ -252,7 +254,7 @@ class AttendanceService:
             
             # Update allowed fields
             allowed_fields = ['attendance_status', 'check_in_time', 'check_out_time', 
-                            'overtime_hours', 'remarks', 'is_approved', 'approved_by']
+                            'overtime_shifts', 'remarks', 'is_approved', 'approved_by']
             
             for field, value in kwargs.items():
                 if field in allowed_fields and hasattr(attendance, field):

@@ -84,7 +84,7 @@ class SalaryService:
     def calculate_salary_from_attendance_data(df, adjustments_df=None):
         """
         Calculate salary using your exact logic from the provided code
-        Updated to use employee salary codes for wage rates
+        Updated to use employee salary codes for wage rates and overtime shifts
         """
         try:
             # If adjustments dataframe is provided but empty, create empty DataFrame
@@ -121,26 +121,71 @@ class SalaryService:
                 if col not in df.columns:
                     df[col] = 0
 
-            # Calculate totals (your exact logic)
-            df['Total Earnings'] = df[['Basic'] + earnings_cols].sum(axis=1)
-            df['Total Deductions'] = df[['PF', 'ESIC'] + deduction_cols].sum(axis=1)
-            
-            # Add monthly deductions for each employee
+            # Calculate overtime allowance for each employee using overtime shifts
             for index, row in df.iterrows():
                 employee_id = str(row['Employee ID']).strip()
+                
                 # Get current year and month from the data or use current date
                 current_date = datetime.now()
                 year = current_date.year
                 month = current_date.month
                 
+                # Get employee object to check for overtime rate
+                employee = Employee.query.filter_by(employee_id=employee_id).first()
+                
+                # Get monthly attendance summary to calculate overtime shifts
+                from services.attendance_service import AttendanceService
+                attendance_summary = AttendanceService.get_monthly_attendance_summary(
+                    employee_id, year, month
+                )
+                
+                if attendance_summary['success']:
+                    summary_data = attendance_summary['data']
+                    
+                    # Step 1: Fetch overtime_shifts from attendance records
+                    total_overtime_shifts = summary_data.get('total_overtime_shifts', 0)
+                    
+                    # Step 2: Convert total shifts into overtime hours
+                    total_overtime_hours = total_overtime_shifts * 8
+                    
+                    # Step 3: Calculate overtime allowance
+                    if employee and hasattr(employee, 'overtime_rate_hourly') and employee.overtime_rate_hourly:
+                        overtime_rate_hourly = employee.overtime_rate_hourly
+                    else:
+                        # Derive hourly rate from daily wage (daily_wage / 8)
+                        daily_wage = row['Daily Wage']
+                        overtime_rate_hourly = daily_wage / 8
+                    
+                    overtime_allowance = total_overtime_hours * overtime_rate_hourly
+                    
+                    # Step 4: Add overtime allowance to the dataframe
+                    df.at[index, 'Overtime Allowance'] = overtime_allowance
+                    df.at[index, 'Overtime Shifts'] = total_overtime_shifts
+                    df.at[index, 'Overtime Hours'] = total_overtime_hours
+                    df.at[index, 'Overtime Rate Hourly'] = overtime_rate_hourly
+                
+                # Get monthly deductions
                 monthly_deduction_total, deduction_details = SalaryService.get_monthly_deductions(employee_id, year, month)
-                df.at[index, 'Total Deductions'] += monthly_deduction_total
                 
                 # Add deduction details as separate columns
                 for deduction_type, amount in deduction_details.items():
                     if deduction_type not in df.columns:
                         df[deduction_type] = 0
                     df.at[index, deduction_type] = amount
+
+            # Calculate totals (your exact logic)
+            df['Total Earnings'] = df[['Basic'] + earnings_cols].sum(axis=1)
+            df['Total Deductions'] = df[['PF', 'ESIC'] + deduction_cols].sum(axis=1)
+            
+            # Add monthly deductions to total deductions
+            for index, row in df.iterrows():
+                employee_id = str(row['Employee ID']).strip()
+                current_date = datetime.now()
+                year = current_date.year
+                month = current_date.month
+                
+                monthly_deduction_total, _ = SalaryService.get_monthly_deductions(employee_id, year, month)
+                df.at[index, 'Total Deductions'] += monthly_deduction_total
             
             df['Net Salary'] = df['Total Earnings'] - df['Total Deductions']
 
@@ -171,6 +216,7 @@ class SalaryService:
     def generate_monthly_salary_data(year, month):
         """
         Generate salary calculation data for a specific month using database records
+        Updated to use overtime shifts for overtime allowance calculation
         """
         try:
             # Get all employees
@@ -240,6 +286,43 @@ class SalaryService:
             for col in earnings_cols + deduction_cols:
                 df[col] = 0
 
+            # Calculate overtime allowance for each employee using overtime shifts
+            for index, row in df.iterrows():
+                employee_id = str(row['Employee ID']).strip()
+                
+                # Get employee object to check for overtime rate
+                employee = Employee.query.filter_by(employee_id=employee_id).first()
+                
+                # Get monthly attendance summary to calculate overtime shifts
+                attendance_summary = AttendanceService.get_monthly_attendance_summary(
+                    employee_id, year, month
+                )
+                
+                if attendance_summary['success']:
+                    summary_data = attendance_summary['data']
+                    
+                    # Step 1: Fetch overtime_shifts from attendance records
+                    total_overtime_shifts = summary_data.get('total_overtime_shifts', 0)
+                    
+                    # Step 2: Convert total shifts into overtime hours
+                    total_overtime_hours = total_overtime_shifts * 8
+                    
+                    # Step 3: Calculate overtime allowance
+                    if employee and hasattr(employee, 'overtime_rate_hourly') and employee.overtime_rate_hourly:
+                        overtime_rate_hourly = employee.overtime_rate_hourly
+                    else:
+                        # Derive hourly rate from daily wage (daily_wage / 8)
+                        daily_wage = row['Daily Wage']
+                        overtime_rate_hourly = daily_wage / 8
+                    
+                    overtime_allowance = total_overtime_hours * overtime_rate_hourly
+                    
+                    # Step 4: Add overtime allowance to the dataframe
+                    df.at[index, 'Overtime Allowance'] = overtime_allowance
+                    df.at[index, 'Overtime Shifts'] = total_overtime_shifts
+                    df.at[index, 'Overtime Hours'] = total_overtime_hours
+                    df.at[index, 'Overtime Rate Hourly'] = overtime_rate_hourly
+
             # Calculate totals
             df['Total Earnings'] = df[['Basic'] + earnings_cols].sum(axis=1)
             df['Total Deductions'] = df[['PF', 'ESIC'] + deduction_cols].sum(axis=1)
@@ -290,7 +373,6 @@ class SalaryService:
 
             # Calculate using your logic with employee's salary code
             days_present = summary_data['present_days']
-            overtime_hours = summary_data.get('total_overtime_hours', 0)  # Get overtime hours
 
             # Get daily wage from employee's salary code
             daily_wage = SalaryService.get_employee_daily_wage(employee_id)
@@ -307,9 +389,10 @@ class SalaryService:
             pf = 0.12 * min(basic, 15000)
             esic = 0.0075 * min(basic, 21000)
             
-            # Calculate Overtime Allowance (OTA) - same as Form B logic
-            overtime_rate = daily_wage / 8 * 1.5  # 1.5x hourly rate for overtime
-            overtime_allowance = overtime_hours * overtime_rate
+            # Calculate overtime allowance using the new overtime shifts logic
+            overtime_allowance, total_overtime_shifts, total_overtime_hours, overtime_rate_hourly = SalaryService.calculate_overtime_allowance(
+                employee_id, year, month
+            )
 
             # Apply adjustments if provided
             special_basic = adjustments.get('Special Basic', 0) if adjustments else 0
@@ -346,6 +429,9 @@ class SalaryService:
                 'HRA': hra,
                 'Overtime': overtime,
                 'Overtime Allowance': overtime_allowance,
+                'Overtime Shifts': total_overtime_shifts,
+                'Overtime Hours': total_overtime_hours,
+                'Overtime Rate Hourly': overtime_rate_hourly,
                 'Others': others_earnings,
                 'Total Earnings': total_earnings,
                 'PF': pf,
@@ -373,4 +459,84 @@ class SalaryService:
                 'success': False,
                 'message': 'An error occurred while calculating salary.',
                 'error': str(e)
+            }
+
+    @staticmethod
+    def calculate_overtime_allowance(employee_id, year, month):
+        """
+        Calculate overtime allowance for an employee using overtime shifts
+        This method implements the new overtime calculation logic:
+        1. Fetch overtime_shifts from attendance records
+        2. Convert total shifts into overtime hours (overtime_hours = overtime_shifts * 8)
+        3. Calculate overtime allowance (overtime_allowance = overtime_hours * overtime_rate)
+        
+        Returns: (overtime_allowance, overtime_shifts, overtime_hours, overtime_rate_hourly)
+        """
+        try:
+            # Get employee object to check for overtime rate
+            employee = Employee.query.filter_by(employee_id=employee_id).first()
+            if not employee:
+                return 0.0, 0.0, 0.0, 0.0
+
+            # Get monthly attendance summary
+            from services.attendance_service import AttendanceService
+            attendance_summary = AttendanceService.get_monthly_attendance_summary(
+                employee_id, year, month
+            )
+
+            if not attendance_summary['success']:
+                return 0.0, 0.0, 0.0, 0.0
+
+            summary_data = attendance_summary['data']
+
+            # Step 1: Fetch overtime_shifts from attendance records
+            total_overtime_shifts = summary_data.get('total_overtime_shifts', 0)
+
+            # Step 2: Convert total shifts into overtime hours
+            total_overtime_hours = total_overtime_shifts * 8
+
+            # Step 3: Calculate overtime allowance
+            if hasattr(employee, 'overtime_rate_hourly') and employee.overtime_rate_hourly:
+                overtime_rate_hourly = employee.overtime_rate_hourly
+            else:
+                # Derive hourly rate from daily wage (daily_wage / 8)
+                daily_wage = SalaryService.get_employee_daily_wage(employee_id)
+                overtime_rate_hourly = daily_wage / 8
+
+            overtime_allowance = total_overtime_hours * overtime_rate_hourly
+
+            return overtime_allowance, total_overtime_shifts, total_overtime_hours, overtime_rate_hourly
+
+        except Exception as e:
+            print(f"Error calculating overtime allowance for employee {employee_id}: {str(e)}")
+            return 0.0, 0.0, 0.0, 0.0
+
+    @staticmethod
+    def get_employee_overtime_summary(employee_id, year, month):
+        """
+        Get detailed overtime summary for an employee
+        Returns overtime shifts, hours, rate, and allowance
+        """
+        try:
+            overtime_allowance, overtime_shifts, overtime_hours, overtime_rate = SalaryService.calculate_overtime_allowance(
+                employee_id, year, month
+            )
+
+            return {
+                'success': True,
+                'data': {
+                    'employee_id': employee_id,
+                    'year': year,
+                    'month': month,
+                    'overtime_shifts': overtime_shifts,
+                    'overtime_hours': overtime_hours,
+                    'overtime_rate_hourly': overtime_rate,
+                    'overtime_allowance': overtime_allowance
+                }
+            }
+
+        except Exception as e:
+            return {
+                'success': False,
+                'message': f'Error getting overtime summary: {str(e)}'
             }
