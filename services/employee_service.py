@@ -3,6 +3,7 @@ from models import db
 from models.employee import Employee
 from models.wage_master import WageMaster
 from models.account_details import AccountDetails
+from models.site import Site
 from datetime import datetime
 
 # def _next_employee_id() -> str:
@@ -142,6 +143,7 @@ def create_employee(payload: dict) -> Employee:
         emergency_contact_relationship=payload.get("emergency_contact_relationship"),
         emergency_contact_phone=payload.get("emergency_contact_phone"),
         salary_code=salary_code,
+        site_id=payload.get("site_id"),
         created_by=payload.get("created_by", "system")
     )
 
@@ -180,14 +182,56 @@ def _parse_date(date_str):
 
     return None
 
+def _parse_bool(value):
+    """Parse boolean value from various formats"""
+    if value is None or pd_isna(value):
+        return False
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.lower() in ('true', 'yes', '1', 'y')
+    if isinstance(value, (int, float)):
+        return value != 0
+    return False
+
+def _get_site_id_from_name(site_name):
+    """Get site_id from site_name"""
+    if not site_name:
+        return None
+    site = Site.query.filter_by(site_name=site_name, is_active=True).first()
+    return site.site_id if site else None
+
+def _get_site_name_from_work_location(work_location):
+    """Try to extract or map site_name from work_location"""
+    if not work_location:
+        return None
+    
+    # First try exact match
+    site = Site.query.filter_by(site_name=work_location, is_active=True).first()
+    if site:
+        return work_location
+    
+    # Try partial match (case insensitive)
+    site = Site.query.filter(Site.site_name.ilike(f"%{work_location}%"), Site.is_active == True).first()
+    if site:
+        return site.site_name
+    
+    # If no match found, return the work_location as is (might need manual mapping)
+    return work_location
+
 def bulk_import_from_frames(sheet_frames: dict) -> dict:
     """
     sheet_frames: dict {sheet_name: DataFrame}
     Returns a summary: {"inserted": n, "errors": [row_error, ...]}
     """
+    from utils.excel_parser import detect_excel_format
+
     summary = {"inserted": 0, "errors": []}
 
     for sheet, df in sheet_frames.items():
+        # Detect format for this sheet
+        format_type = detect_excel_format(df)
+
         for idx, row in df.iterrows():
             try:
                 # Split full name into first and last name
@@ -196,19 +240,72 @@ def bulk_import_from_frames(sheet_frames: dict) -> dict:
                 first_name = name_parts[0] if name_parts else ""
                 last_name = name_parts[1] if len(name_parts) > 1 else ""
 
-                payload = {
-                    "first_name": first_name,
-                    "last_name": last_name,
-                    "date_of_birth": pd_to_date(row["Date of Birth"]),
-                    "gender": str(row["Gender"]).strip() if not pd_isna(row["Gender"]) else None,
-                    "site_name": str(row["Site Name"]).strip(),
-                    "rank": str(row["Rank"]).strip(),
-                    "state": str(row["State"]).strip(),
-                    "base_salary": row["Base Salary"],
-                    # add optional mappings as needed:
-                    # "department": row.get("Department"),
-                    # "employment_type": row.get("Employment Type"),
-                }
+                if format_type == 'old':
+                    # Old format payload
+                    site_name = str(row["Site Name"]).strip() if "Site Name" in row and not pd_isna(row["Site Name"]) else None
+                    payload = {
+                        "first_name": first_name,
+                        "last_name": last_name,
+                        "date_of_birth": pd_to_date(row["Date of Birth"]),
+                        "gender": str(row["Gender"]).strip() if not pd_isna(row["Gender"]) else None,
+                        "site_name": site_name,
+                        "rank": str(row["Rank"]).strip() if "Rank" in row and not pd_isna(row["Rank"]) else None,
+                        "state": str(row["State"]).strip() if "State" in row and not pd_isna(row["State"]) else None,
+                        "base_salary": row["Base Salary"] if "Base Salary" in row and not pd_isna(row["Base Salary"]) else None,
+                    }
+                    # Add site_id for employee record
+                    if site_name:
+                        payload["site_id"] = _get_site_id_from_name(site_name)
+                else:
+                    # New format payload (comprehensive)
+                    work_location = str(row.get("Work Location")).strip() if row.get("Work Location") and not pd_isna(row["Work Location"]) else None
+                    
+                    payload = {
+                        "first_name": first_name,
+                        "last_name": last_name,
+                        "date_of_birth": pd_to_date(row.get("Date of Birth")),
+                        "gender": str(row.get("Gender")).strip() if row.get("Gender") and not pd_isna(row["Gender"]) else None,
+                        "marital_status": str(row.get("Marital Status")).strip() if row.get("Marital Status") and not pd_isna(row["Marital Status"]) else None,
+                        "nationality": str(row.get("Nationality")).strip() if row.get("Nationality") and not pd_isna(row["Nationality"]) else "Indian",
+                        "blood_group": str(row.get("Blood Group")).strip() if row.get("Blood Group") and not pd_isna(row["Blood Group"]) else None,
+                        "address": str(row.get("Permanent Address")).strip() if row.get("Permanent Address") and not pd_isna(row["Permanent Address"]) else None,
+                        "phone_number": str(row.get("Mobile Number")).strip() if row.get("Mobile Number") and not pd_isna(row["Mobile Number"]) else None,
+                        "alternate_contact_number": str(row.get("Alternate Contact Number")).strip() if row.get("Alternate Contact Number") and not pd_isna(row["Alternate Contact Number"]) else None,
+                        "adhar_number": str(row.get("Aadhaar Number")).strip() if row.get("Aadhaar Number") and not pd_isna(row["Aadhaar Number"]) else None,
+                        "pan_card_number": str(row.get("PAN Card Number")).strip() if row.get("PAN Card Number") and not pd_isna(row["PAN Card Number"]) else None,
+                        "voter_id_driving_license": str(row.get("Voter ID / Driving License")).strip() if row.get("Voter ID / Driving License") and not pd_isna(row["Voter ID / Driving License"]) else None,
+                        "uan": str(row.get("UAN")).strip() if row.get("UAN") and not pd_isna(row["UAN"]) else None,
+                        "esic_number": str(row.get("ESIC Number")).strip() if row.get("ESIC Number") and not pd_isna(row["ESIC Number"]) else None,
+                        "hire_date": pd_to_date(row.get("Date of Joining")),
+                        "employment_type": str(row.get("Employment Type")).strip() if row.get("Employment Type") and not pd_isna(row["Employment Type"]) else None,
+                        "department_id": str(row.get("Department")).strip() if row.get("Department") and not pd_isna(row["Department"]) else None,
+                        "designation": str(row.get("Designation")).strip() if row.get("Designation") and not pd_isna(row["Designation"]) else None,
+                        "work_location": work_location,
+                        "reporting_manager": str(row.get("Reporting Manager")).strip() if row.get("Reporting Manager") and not pd_isna(row["Reporting Manager"]) else None,
+                        "skill_category": str(row.get("Skill Category")).strip() if row.get("Skill Category") and not pd_isna(row["Skill Category"]) else None,
+                        "salary_advance_loan": str(row.get("Salary Advance/Loan")).strip() if row.get("Salary Advance/Loan") and not pd_isna(row["Salary Advance/Loan"]) else None,
+                        "pf_applicability": _parse_bool(row.get("PF Applicability")),
+                        "esic_applicability": _parse_bool(row.get("ESIC Applicability")),
+                        "professional_tax_applicability": _parse_bool(row.get("Professional Tax Applicability")),
+                        "experience_duration": str(row.get("Experience Duration")).strip() if row.get("Experience Duration") and not pd_isna(row["Experience Duration"]) else None,
+                        "highest_qualification": str(row.get("Highest Qualification")).strip() if row.get("Highest Qualification") and not pd_isna(row["Highest Qualification"]) else None,
+                        "year_of_passing": str(row.get("Year of Passing")).strip() if row.get("Year of Passing") and not pd_isna(row["Year of Passing"]) else None,
+                        "additional_certifications": str(row.get("Additional Certifications")).strip() if row.get("Additional Certifications") and not pd_isna(row["Additional Certifications"]) else None,
+                        "emergency_contact_name": str(row.get("Emergency Contact Name")).strip() if row.get("Emergency Contact Name") and not pd_isna(row["Emergency Contact Name"]) else None,
+                        "emergency_contact_relationship": str(row.get("Emergency Relationship")).strip() if row.get("Emergency Relationship") and not pd_isna(row["Emergency Relationship"]) else None,
+                        "emergency_contact_phone": str(row.get("Emergency Phone Number")).strip() if row.get("Emergency Phone Number") and not pd_isna(row["Emergency Phone Number"]) else None,
+                        "salary_code": str(row.get("Salary Code")).strip() if row.get("Salary Code") and not pd_isna(row["Salary Code"]) else None,
+                        "bank_account_number": str(row.get("Bank Account Number")).strip() if row.get("Bank Account Number") and not pd_isna(row["Bank Account Number"]) else None,
+                        "bank_name": str(row.get("Bank Name")).strip() if row.get("Bank Name") and not pd_isna(row["Bank Name"]) else None,
+                        "ifsc_code": str(row.get("IFSC Code")).strip() if row.get("IFSC Code") and not pd_isna(row["IFSC Code"]) else None,
+                    }
+                    
+                    # For new format, try to map work_location to site_id
+                    if work_location:
+                        site_name = _get_site_name_from_work_location(work_location)
+                        if site_name:
+                            payload["site_id"] = _get_site_id_from_name(site_name)
+
                 if not payload["first_name"]:
                     raise ValueError("First Name is required")
 
@@ -268,6 +365,10 @@ def get_all_employees(page: int = 1, per_page: int = 10):
         per_page=per_page,
         error_out=False
     )
+
+def get_all_employees_unpaginated():
+    """Get all employees without pagination"""
+    return Employee.query.all()
 
 
 def search_employees(search_term: str = "", department: str = None, employment_status: str = None):

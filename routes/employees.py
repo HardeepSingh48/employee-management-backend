@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify
-from services.employee_service import create_employee, bulk_import_from_frames, get_employee_by_id, get_all_employees, search_employees
+from services.employee_service import create_employee, bulk_import_from_frames, get_employee_by_id, get_all_employees, get_all_employees_unpaginated, search_employees
 from models import db
 from models.employee import Employee
 from utils.upload import save_file
@@ -214,12 +214,36 @@ def get_employee(employee_id):
         return jsonify({"success": False, "message": str(e)}), 400
 
 
-@employees_bp.route("/<employee_id>", methods=["PUT", "OPTIONS"])
+@employees_bp.route("/<employee_id>", methods=["PUT", "DELETE", "OPTIONS"])
 def update_employee(employee_id):
-    """Update an existing employee's basic details"""
+    """Update or delete an existing employee"""
     if request.method == 'OPTIONS':
         return '', 200
 
+    if request.method == 'DELETE':
+        try:
+            emp = Employee.query.filter_by(employee_id=employee_id).first()
+            if not emp:
+                return jsonify({"success": False, "message": "Employee not found"}), 404
+
+            # Delete associated account details if they exist
+            account = AccountDetails.query.filter_by(emp_id=employee_id).first()
+            if account:
+                db.session.delete(account)
+
+            # Delete the employee
+            db.session.delete(emp)
+            db.session.commit()
+
+            return jsonify({
+                "success": True,
+                "message": "Employee deleted successfully"
+            }), 200
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({"success": False, "message": str(e)}), 400
+
+    # PUT method for updating
     try:
         emp = Employee.query.filter_by(employee_id=employee_id).first()
         if not emp:
@@ -261,20 +285,48 @@ def update_employee(employee_id):
 @employees_bp.route("/list", methods=["GET", "OPTIONS"])
 @token_required  # Add this decorator
 def list_employees(current_user):  # Add current_user parameter
-    """List employees based on user role"""
+    """List employees based on user role with search and pagination support"""
+    if request.method == 'OPTIONS':
+        return '', 200
+
     try:
         page = int(request.args.get('page', 1))
         per_page = int(request.args.get('per_page', 10))
-        
+        search_term = request.args.get('search', '').strip()
+        department = request.args.get('department', '').strip()
+        employment_status = request.args.get('status', '').strip()
+
+        # Base query
+        query = Employee.query
+
         # Filter employees based on user role
         if current_user.role == 'supervisor':
             # Supervisor can only see employees from their site
-            employees = Employee.query.filter_by(site_id=current_user.site_id)\
-                                    .paginate(page=page, per_page=per_page, error_out=False)
-        else:
-            # Admin/HR can see all employees
-            employees = get_all_employees(page=page, per_page=per_page)
-        
+            query = query.filter_by(site_id=current_user.site_id)
+
+        # Apply search filters
+        if search_term:
+            search_filter = f"%{search_term}%"
+            query = query.filter(
+                db.or_(
+                    Employee.first_name.ilike(search_filter),
+                    Employee.last_name.ilike(search_filter),
+                    Employee.employee_id.cast(db.String).ilike(search_filter),
+                    Employee.email.ilike(search_filter),
+                    Employee.phone_number.ilike(search_filter),
+                    Employee.designation.ilike(search_filter)
+                )
+            )
+
+        if department:
+            query = query.filter(Employee.department_id.ilike(f"%{department}%"))
+
+        if employment_status:
+            query = query.filter(Employee.employment_status.ilike(f"%{employment_status}%"))
+
+        # Apply pagination
+        employees = query.paginate(page=page, per_page=per_page, error_out=False)
+
         employee_list = []
         for emp in employees.items:
             employee_list.append({
@@ -306,14 +358,14 @@ def list_employees(current_user):  # Add current_user parameter
 @employees_bp.route("/all", methods=["GET", "OPTIONS"])
 def get_all_employees_simple():
     """Get all employees without pagination (for dropdowns, etc.)"""
-    try:
-        employees = get_all_employees()
+    if request.method == 'OPTIONS':
+        return '', 200
 
-        # Handle both paginated and non-paginated results
-        if hasattr(employees, 'items'):
-            employee_list = employees.items
-        else:
-            employee_list = employees
+    try:
+        employees = get_all_employees_unpaginated()
+
+        # Now employees is a list, not paginated
+        employee_list = employees
 
         simple_list = []
         for emp in employee_list:
@@ -323,8 +375,40 @@ def get_all_employees_simple():
                 "last_name": emp.last_name,
                 "full_name": f"{emp.first_name} {emp.last_name}",
                 "email": emp.email,
+                "phone_number": emp.phone_number,
                 "department_id": emp.department_id,
-                "employment_status": emp.employment_status
+                "designation": emp.designation,
+                "employment_status": emp.employment_status,
+                "hire_date": emp.hire_date.isoformat() if emp.hire_date else None,
+                # Include additional fields for comprehensive display
+                "date_of_birth": emp.date_of_birth.isoformat() if emp.date_of_birth else None,
+                "gender": emp.gender,
+                "marital_status": emp.marital_status,
+                "nationality": emp.nationality,
+                "blood_group": emp.blood_group,
+                "address": emp.address,
+                "alternate_contact_number": emp.alternate_contact_number,
+                "adhar_number": emp.adhar_number,
+                "pan_card_number": emp.pan_card_number,
+                "voter_id_driving_license": emp.voter_id_driving_license,
+                "uan": emp.uan,
+                "esic_number": emp.esic_number,
+                "employment_type": emp.employment_type,
+                "work_location": emp.work_location,
+                "reporting_manager": emp.reporting_manager,
+                "salary_code": emp.salary_code,
+                "skill_category": emp.skill_category,
+                "pf_applicability": emp.pf_applicability,
+                "esic_applicability": emp.esic_applicability,
+                "professional_tax_applicability": emp.professional_tax_applicability,
+                "salary_advance_loan": emp.salary_advance_loan,
+                "highest_qualification": emp.highest_qualification,
+                "year_of_passing": emp.year_of_passing,
+                "additional_certifications": emp.additional_certifications,
+                "experience_duration": emp.experience_duration,
+                "emergency_contact_name": emp.emergency_contact_name,
+                "emergency_contact_relationship": emp.emergency_contact_relationship,
+                "emergency_contact_phone": emp.emergency_contact_phone,
             })
 
         return jsonify({
