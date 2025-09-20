@@ -32,8 +32,12 @@ def create_app(register_blueprints: bool = True):
         "https://employee-management-frontend-kohl-eight.vercel.app"
     ]
 
-    # Add your production frontend URL here when you deploy it
-    # allowed_origins.append("https://your-frontend-domain.com")
+    # Add additional origins from environment variable if set
+    additional_origins = os.getenv("ADDITIONAL_CORS_ORIGINS", "")
+    if additional_origins:
+        allowed_origins.extend([origin.strip() for origin in additional_origins.split(",") if origin.strip()])
+
+    print(f"CORS allowed origins: {allowed_origins}")
 
     # Configure CORS with enhanced settings for development/testing
     CORS(app,
@@ -59,12 +63,16 @@ def create_app(register_blueprints: bool = True):
     @app.before_request
     def handle_preflight():
         if request.method == "OPTIONS":
-            response = make_response()
-            response.headers.add("Access-Control-Allow-Origin", request.headers.get('Origin', '*'))
-            response.headers.add('Access-Control-Allow-Headers', "*")
-            response.headers.add('Access-Control-Allow-Methods', "*")
-            response.headers.add('Access-Control-Allow-Credentials', "true")
-            return response
+            origin = request.headers.get('Origin', '*')
+            # Check if origin is in allowed origins
+            if origin in allowed_origins or origin == '*':
+                response = make_response()
+                response.headers.add("Access-Control-Allow-Origin", origin)
+                response.headers.add('Access-Control-Allow-Headers', "Content-Type, Authorization, X-Requested-With, Accept, Origin, Access-Control-Allow-Origin, X-CSRF-Token, X-Requested-With")
+                response.headers.add('Access-Control-Allow-Methods', "GET, POST, PUT, DELETE, OPTIONS, PATCH")
+                response.headers.add('Access-Control-Allow-Credentials', "true")
+                response.headers.add('Access-Control-Max-Age', "86400")
+                return response
 
     app.config["SQLALCHEMY_DATABASE_URI"] = SQLALCHEMY_DATABASE_URI
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = SQLALCHEMY_TRACK_MODIFICATIONS
