@@ -585,12 +585,16 @@ def preview_payroll(current_user):
         html_content += "<body>"
         
         for employee in employees:
-            employee_data = {
-                'Employee ID': employee.employee_id,
-                'Employee Name': f"{employee.first_name} {employee.last_name}"
-            }
-            payslip_html = generate_payslip_html(employee_data, year, month)
-            html_content += payslip_html
+            try:
+                employee_data = {
+                    'Employee ID': employee.employee_id,
+                    'Employee Name': f"{employee.first_name} {employee.last_name}"
+                }
+                payslip_html = generate_payslip_html(employee_data, year, month)
+                html_content += payslip_html
+            except Exception as emp_error:
+                print(f"Error generating payslip for employee {employee.employee_id}: {str(emp_error)}")
+                html_content += f"<div>Error generating payslip for {employee.first_name} {employee.last_name}: {str(emp_error)}</div>"
         
         html_content += "</body>"
         
