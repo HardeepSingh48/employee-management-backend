@@ -100,20 +100,22 @@ def number_to_words(num):
 
 def generate_payslip_html(employee_data, year, month):
     """Generate optimized HTML for a single payslip (compact layout)"""
-    
+
     try:
         # Calculate salary using existing service
         salary_result = SalaryService.calculate_individual_salary(
             employee_data['Employee ID'], year, month
         )
-        
-        if not salary_result['success']:
-            return f"<div>Error calculating salary for {employee_data['Employee Name']}: {salary_result.get('message', 'Unknown error')}</div>"
+
+        if not salary_result or not salary_result.get('success'):
+            error_msg = f"Error calculating salary for {employee_data['Employee Name']}: {salary_result.get('message', 'Unknown error') if salary_result else 'No result returned'}"
+            return f"<div>{error_msg}</div>"
     except Exception as e:
-        return f"<div>Exception calculating salary for {employee_data['Employee Name']}: {str(e)}</div>"
-    
+        error_msg = f"Exception calculating salary for {employee_data['Employee Name']}: {str(e)}"
+        return f"<div>{error_msg}</div>"
+
     salary_data = salary_result['data']
-    
+
     # Get employee details
     employee = Employee.query.filter_by(employee_id=employee_data['Employee ID']).first()
     
@@ -206,10 +208,10 @@ def generate_payslip_html(employee_data, year, month):
                 <p><strong>Days:</strong> {salary_data.get('Present Days', 0)}</p>
             </div>
             <div class="right-info">
-                <p><strong>Dept:</strong> {(employee.department.department_name if employee and employee.department else 'N/A')[:12]}</p>
-                <p><strong>Desig:</strong> {(employee.designation if employee else 'N/A')[:10]}</p>
+                <p><strong>Dept:</strong> {(employee.department.department_name if employee and employee.department and hasattr(employee.department, 'department_name') and employee.department.department_name else 'N/A')[:12]}</p>
+                <p><strong>Desig:</strong> {(employee.designation if employee and employee.designation else 'N/A')[:10]}</p>
                 <p><strong>Rate:</strong> ₹{format_amount(salary_data.get('Daily Wage', 0))}</p>
-                <p><strong>Site:</strong> {(employee.site_id if employee else 'N/A')[:10]}</p>
+                <p><strong>Site:</strong> {(employee.site_id if employee and employee.site_id else 'N/A')[:10]}</p>
             </div>
         </div>
         
