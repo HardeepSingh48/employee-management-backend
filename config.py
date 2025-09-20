@@ -1,23 +1,31 @@
 # config.py
 import os
+from dotenv import load_dotenv
 
-DATABASE_URL = os.getenv("DATABASE_URL")
-DB_USER = os.getenv("DB_USER", "sspl_user")
-DB_PASSWORD = os.getenv("DB_PASSWORD", "password")
-DB_HOST = os.getenv("DB_HOST", "localhost")
+# Load environment variables
+load_dotenv()
+
+# Database configuration - prioritize Supabase setup
+DB_USER = os.getenv("DB_USER", "postgres")
+DB_PASSWORD = os.getenv("DB_PASSWORD")
+DB_HOST = os.getenv("DB_HOST")
 DB_PORT = os.getenv("DB_PORT", "5432")
-DB_NAME = os.getenv("DB_NAME", "sspl_db")
+DB_NAME = os.getenv("DB_NAME", "postgres")
 
-# Prefer full DATABASE_URL if provided (Render provides this). Fallback to discrete vars.
-SQLALCHEMY_DATABASE_URI = (
-    DATABASE_URL
-    or f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
-    or "postgresql://employee_management_db_zwaz_user:iJCGc6DAulfzuW758GB3L2yMJOYUPtWY@dpg-d2hl5j24d50c739hsm30-a.singapore-postgres.render.com/employee_management_db_zwaz"
-)
+# Build the database URI
+if DB_HOST and DB_PASSWORD:
+    # Use Supabase or custom database configuration
+    SQLALCHEMY_DATABASE_URI = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+else:
+    # Fallback to DATABASE_URL if provided (for deployment platforms)
+    SQLALCHEMY_DATABASE_URI = os.getenv("DATABASE_URL")
+    if not SQLALCHEMY_DATABASE_URI:
+        raise ValueError("Database configuration missing! Please set DB_HOST, DB_PASSWORD, etc. in your .env file")
+
 SQLALCHEMY_TRACK_MODIFICATIONS = False
 
-# uploads
+# Application configuration
+SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-change-in-production")
 UPLOADS_DIR = os.getenv("UPLOADS_DIR", "uploads/employees")
 MAX_CONTENT_LENGTH = 10 * 1024 * 1024  # 10 MB
 ALLOWED_EXTENSIONS = {"jpeg", "jpg", "png", "pdf", "doc", "docx", "xlsx", "xls"}
-SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret")
