@@ -14,6 +14,7 @@ from models.user import User
 from models.employee import Employee
 from flask_migrate import Migrate
 from models.site import Site
+from routes.superadmin import superadmin_bp
 
 def create_app(register_blueprints: bool = True):
     app = Flask(__name__)
@@ -34,15 +35,36 @@ def create_app(register_blueprints: bool = True):
     # Add your production frontend URL here when you deploy it
     # allowed_origins.append("https://your-frontend-domain.com")
 
-    # Configure CORS with more permissive settings for development/testing
+    # Configure CORS with enhanced settings for development/testing
     CORS(app,
          origins=allowed_origins,
          methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
-         allow_headers=["Content-Type", "Authorization", "X-Requested-With", "Accept", "Origin", "Access-Control-Allow-Origin"],
+         allow_headers=[
+             "Content-Type",
+             "Authorization",
+             "X-Requested-With",
+             "Accept",
+             "Origin",
+             "Access-Control-Allow-Origin",
+             "X-CSRF-Token",
+             "X-Requested-With"
+         ],
          supports_credentials=True,
-         expose_headers=["Content-Type", "Authorization"],
+         expose_headers=["Content-Type", "Authorization", "X-Total-Count"],
          send_wildcard=False,
-         automatic_options=True)
+         automatic_options=True,
+         max_age=86400)  # Cache preflight for 24 hours
+    
+    # Add explicit OPTIONS handler for debugging
+    @app.before_request
+    def handle_preflight():
+        if request.method == "OPTIONS":
+            response = make_response()
+            response.headers.add("Access-Control-Allow-Origin", request.headers.get('Origin', '*'))
+            response.headers.add('Access-Control-Allow-Headers', "*")
+            response.headers.add('Access-Control-Allow-Methods', "*")
+            response.headers.add('Access-Control-Allow-Credentials', "true")
+            return response
 
     app.config["SQLALCHEMY_DATABASE_URI"] = SQLALCHEMY_DATABASE_URI
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = SQLALCHEMY_TRACK_MODIFICATIONS
@@ -137,6 +159,7 @@ def create_app(register_blueprints: bool = True):
         app.register_blueprint(sites_bp, url_prefix="/api/sites")
         app.register_blueprint(deductions_bp, url_prefix="/api/deductions")
         app.register_blueprint(payroll_bp, url_prefix="/api/payroll")
+        app.register_blueprint(superadmin_bp, url_prefix="/api")
 
     # Add a simple root route for testing
     @app.route("/")

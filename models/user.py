@@ -29,8 +29,8 @@ class User(db.Model):
     
     # User details
     name = db.Column(db.String(150), nullable=False)
-    role = db.Column(db.String(20), 
-            db.CheckConstraint("role IN ('admin', 'hr', 'manager', 'employee', 'supervisor')"), 
+    role = db.Column(db.String(20),
+            db.CheckConstraint("role IN ('admin', 'superadmin', 'hr', 'manager', 'employee', 'supervisor')"),
             nullable=False, default='employee')
     
     # Status and permissions
