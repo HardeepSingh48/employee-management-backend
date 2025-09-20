@@ -419,11 +419,18 @@ def get_site_employees(current_user):
         
         employee_data = []
         for emp in employees:
+            # Ensure full_name is never empty
+            first_name = emp.first_name or ""
+            last_name = emp.last_name or ""
+            full_name = f"{first_name} {last_name}".strip()
+            if not full_name:
+                full_name = emp.employee_id  # Fallback to employee ID if no name
+
             employee_data.append({
                 'employee_id': emp.employee_id,
                 'first_name': emp.first_name,
                 'last_name': emp.last_name,
-                'full_name': f"{emp.first_name} {emp.last_name}",
+                'full_name': full_name,
                 'site_id': emp.site_id,
                 'department_name': emp.department.department_name if emp.department else None,
                 'designation': emp.designation
