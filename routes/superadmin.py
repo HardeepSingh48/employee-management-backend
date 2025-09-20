@@ -134,14 +134,14 @@ def update_user(current_user, user_id):
                 return jsonify({"success": False, "message": "Invalid role"}), 400
             user.role = data['role']
         if 'site_id' in data:
-            if data['role'] == 'supervisor' and data['site_id']:
+            if user.role == 'supervisor' and data['site_id']:
                 # Validate site exists
                 from models.site import Site
                 site = Site.query.filter_by(site_id=data['site_id']).first()
                 if not site:
                     return jsonify({"success": False, "message": "Invalid site ID"}), 400
                 user.site_id = data['site_id']
-            elif data['role'] == 'admin':
+            elif user.role == 'admin':
                 user.site_id = None  # Admins don't need site assignment
         
         # Update password if provided
