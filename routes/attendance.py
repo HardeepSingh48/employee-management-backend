@@ -11,13 +11,85 @@ from routes.auth import token_required
 import logging
 import os
 import calendar
-
+import time
+import uuid
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 attendance_bp = Blueprint("attendance", __name__)
+
+def batch_load_employees(employee_ids, site_id=None, user_role='admin'):
+    """Load employees in batch with site filtering"""
+    query = Employee.query.filter(Employee.employee_id.in_(employee_ids))
+    if user_role == 'supervisor' and site_id:
+        query = query.filter(Employee.site_id == site_id)
+    
+    employees = query.all()
+    return {str(emp.employee_id).strip(): emp for emp in employees}
+
+def batch_load_existing_attendance(employee_ids, start_date, end_date):
+    """Load existing attendance records in batch"""
+    existing_attendance = Attendance.query.filter(
+        Attendance.employee_id.in_(employee_ids),
+        Attendance.attendance_date >= start_date,
+        Attendance.attendance_date <= end_date
+    ).all()
+    
+    # Create lookup dictionary: "employee_id_date" -> attendance_record
+    existing_dict = {}
+    for att in existing_attendance:
+        key = f"{att.employee_id}_{att.attendance_date}"
+        existing_dict[key] = att
+    
+    return existing_dict
+
+def safe_bulk_insert(attendance_dicts, chunk_size=1000):
+    """Safely insert attendance records in chunks"""
+    results = {
+        "successful": 0,
+        "failed": 0,
+        "errors": []
+    }
+    
+    try:
+        # Process in chunks to avoid memory issues
+        for i in range(0, len(attendance_dicts), chunk_size):
+            chunk = attendance_dicts[i:i + chunk_size]
+            try:
+                db.session.bulk_insert_mappings(Attendance, chunk)
+                db.session.flush()
+                results["successful"] += len(chunk)
+                logger.info(f"Successfully processed chunk {i//chunk_size + 1}: {len(chunk)} records")
+            except Exception as chunk_error:
+                db.session.rollback()
+                logger.error(f"Chunk {i//chunk_size + 1} failed: {str(chunk_error)}")
+                
+                # Fallback: Try individual inserts for failed chunk
+                for record in chunk:
+                    try:
+                        attendance = Attendance(**record)
+                        db.session.add(attendance)
+                        db.session.flush()
+                        results["successful"] += 1
+                    except Exception as individual_error:
+                        db.session.rollback()
+                        results["failed"] += 1
+                        results["errors"].append(
+                            f"Employee {record.get('employee_id', 'Unknown')}: {str(individual_error)}"
+                        )
+        
+        db.session.commit()
+        
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Bulk insert failed: {str(e)}")
+        results["errors"].append(f"Bulk operation failed: {str(e)}")
+        raise e
+    
+    return results
+
 
 STATUS_MAP = {
     'P': 'Present',
@@ -881,13 +953,14 @@ def download_attendance_template(current_user):
 @attendance_bp.route("/bulk-mark-excel", methods=["POST"])
 @token_required
 def bulk_mark_attendance_excel(current_user):
-    """Bulk mark attendance via Excel file (supervisor only)"""
+    """Optimized bulk mark attendance via Excel file"""
+    start_time = time.time()
+    
     try:
-        # Check authorization
+        # Authorization and file validation (same as original)
         if current_user.role not in ['supervisor', 'admin']:
             return jsonify({"success": False, "message": "Unauthorized"}), 403
         
-        # Check if file is present
         if 'file' not in request.files:
             return jsonify({"success": False, "message": "No file uploaded"}), 400
         
@@ -907,25 +980,24 @@ def bulk_mark_attendance_excel(current_user):
         except ValueError:
             return jsonify({"success": False, "message": "Invalid month or year format"}), 400
         
-        # Validate file type
+        # File validation
         allowed_extensions = {'.xlsx', '.xls'}
         file_ext = os.path.splitext(file.filename)[1].lower()
         if file_ext not in allowed_extensions:
             return jsonify({"success": False, "message": "Invalid file type. Please upload an Excel file (.xlsx or .xls)"}), 400
         
-        # Create a BytesIO object from the uploaded file
+        # Read Excel file
         file_data = BytesIO(file.read())
         
-        # Read Excel file using safe method - DON'T force dtype=str for all columns
         try:
             df = safe_read_excel(file_data)
         except Exception as e:
             return jsonify({"success": False, "message": f"Error reading Excel file: {str(e)}"}), 400
         
-        # Convert column names to string to handle datetime objects
+        # Clean column names
         df.columns = df.columns.astype(str).str.strip()
         
-        # Fix Employee ID column - convert to string and remove .0 if present
+        # Find required columns (same as original)
         employee_id_col = None
         for col in df.columns:
             if col.lower().replace(' ', '').replace('_', '') in ['employeeid', 'empid', 'id']:
@@ -938,10 +1010,16 @@ def bulk_mark_attendance_excel(current_user):
                 "message": "Employee ID column not found. Expected column names: 'Employee ID', 'Emp ID', or 'ID'"
             }), 400
         
-        # Convert Employee ID to string and clean up
-        df[employee_id_col] = df[employee_id_col].astype(str).str.replace('.0', '', regex=False)
+        # Clean employee IDs
+        df[employee_id_col] = (
+            df[employee_id_col]
+            .astype(str)
+            .str.strip()                # remove spaces
+            .str.replace('.0', '', regex=False)  # remove Excel float .0
+            .str.replace(r'\.0$', '', regex=True) # extra safeguard
+        )
         
-        # Look for employee name column
+        # Find employee name column
         employee_name_col = None
         for col in df.columns:
             if col.lower().replace(' ', '').replace('_', '') in ['employeename', 'name', 'empname']:
@@ -954,18 +1032,7 @@ def bulk_mark_attendance_excel(current_user):
                 "message": "Employee Name column not found. Expected column names: 'Employee Name', 'Name', or 'Emp Name'"
             }), 400
         
-        # Process attendance data
-        results = {
-            "processed": 0,
-            "successful": 0,
-            "failed": 0,
-            "errors": [],
-            "skipped_records": 0,
-            "updated_records": 0,
-            "new_records": 0
-        }
-        
-        # Find date columns - now handles both datetime objects and string formats
+        # Find date columns
         date_columns = []
         for col in df.columns:
             if col not in [employee_id_col, employee_name_col, 'Skill Level'] and is_date(col):
@@ -977,7 +1044,77 @@ def bulk_mark_attendance_excel(current_user):
                 "message": "No valid date columns found. Expected format: dd/mm/yyyy, dd-mm-yyyy, or datetime objects"
             }), 400
         
-        logger.info(f"Found {len(date_columns)} date columns: {date_columns[:5]}...")  # Show first 5 for debugging
+        # OPTIMIZATION STARTS HERE
+        
+        # Step 1: Extract all unique employee IDs from file
+        employee_ids_in_file = df[employee_id_col].dropna().astype(str).str.strip().unique()
+        employee_ids_in_file = [eid for eid in employee_ids_in_file if eid and eid != 'nan']
+        
+        # Step 2: Batch load all employees (1 query instead of N queries)
+        logger.info(f"Excel IDs (first 10): {employee_ids_in_file[:10]}")
+
+        try:
+            employee_dict = batch_load_employees(
+            employee_ids_in_file,
+            current_user.site_id,
+            current_user.role
+        )
+            logger.info(f"DB IDs loaded (first 10): {list(employee_dict.keys())[:10]}")
+        except Exception as e:
+            logger.error(f"❌ Error loading employees from DB: {e}")
+            return jsonify({"error": "Failed to load employees from DB"}), 500
+
+        logger.info(f"Loading {len(employee_ids_in_file)} employees in batch...")
+        employee_dict = batch_load_employees(
+            employee_ids_in_file, 
+            current_user.site_id, 
+            current_user.role
+        )
+        
+        # Step 3: Parse all dates to determine date range
+        all_dates = set()
+        for col in date_columns:
+            year_from_col, month_from_col, day_from_col = parse_date_from_column(col)
+            if year_from_col and month_from_col and day_from_col:
+                try:
+                    attendance_date = date(year_from_col, month_from_col, day_from_col)
+                    all_dates.add(attendance_date)
+                except ValueError:
+                    continue
+        
+        if not all_dates:
+            return jsonify({
+                "success": False,
+                "message": "No valid dates found in columns"
+            }), 400
+        
+        min_date = min(all_dates)
+        max_date = max(all_dates)
+        
+        # Step 4: Batch load existing attendance (1 query instead of N queries)
+        logger.info(f"Loading existing attendance from {min_date} to {max_date}...")
+        existing_attendance_dict = batch_load_existing_attendance(
+            list(employee_dict.keys()), 
+            min_date, 
+            max_date
+        )
+        
+        # Initialize results tracking
+        results = {
+            "processed": 0,
+            "successful": 0,
+            "failed": 0,
+            "errors": [],
+            "skipped_records": 0,
+            "updated_records": 0,
+            "new_records": 0
+        }
+        
+        # Step 5: Prepare bulk operations
+        new_attendance_records = []
+        updated_records = []
+        
+        logger.info(f"Processing {len(df)} employees with {len(date_columns)} date columns...")
         
         # Process each row
         for index, row in df.iterrows():
@@ -988,75 +1125,68 @@ def bulk_mark_attendance_excel(current_user):
                 if pd.isna(row[employee_id_col]) or employee_id in ['nan', ''] or not employee_id:
                     continue
                 
-                # Check if employee exists and belongs to supervisor's site
-                employee = Employee.query.filter_by(employee_id=employee_id).first()
+                # Check if employee exists (O(1) lookup instead of database query)
+                employee = employee_dict.get(employee_id)
                 if not employee:
-                    results["errors"].append(f"Employee {employee_id} not found")
-                    results["failed"] += 1
-                    continue
-                
-                # For supervisors, check if employee belongs to their site
-                if current_user.role == 'supervisor' and employee.site_id != current_user.site_id:
-                    results["errors"].append(f"Employee {employee_id} not in your site")
+                    results["errors"].append(f"Employee {employee_id} not found or not in your site")
                     results["failed"] += 1
                     continue
                 
                 employee_processed = False
                 
-                # Process attendance for each date column
+                # Process each date column for this employee
                 for col in date_columns:
-                    # Skip blank or invalid values
+                    # Skip blank values
                     if pd.isna(row[col]) or str(row[col]).strip() == '':
                         continue
                     
                     try:
                         attendance_value = normalize_attendance_value(row[col])
-
                         if not attendance_value:
-                            logger.warning(f"Skipping invalid attendance value '{row[col]}' in column {col} for employee {employee_id}")
                             continue
                         
-                        # Parse date from column name using updated helper function
+                        # Parse date from column
                         year_from_col, month_from_col, day_from_col = parse_date_from_column(col)
-                        
                         if year_from_col and month_from_col and day_from_col:
-                            attendance_date = date(year_from_col, month_from_col, day_from_col)
+                            try:
+                                attendance_date = date(year_from_col, month_from_col, day_from_col)
+                            except ValueError:
+                                continue
                             
-                            # Check if attendance already exists
-                            existing = Attendance.query.filter_by(
-                                employee_id=employee.employee_id,
-                                attendance_date=attendance_date
-                            ).first()
+                            # Check if attendance exists (O(1) lookup instead of database query)
+                            existing_key = f"{employee.employee_id}_{attendance_date}"
+                            existing = existing_attendance_dict.get(existing_key)
                             
                             if existing:
-                                # Update existing record
+                                # Mark for update
                                 existing.attendance_status = attendance_value
                                 existing.marked_by = current_user.role
                                 existing.updated_by = current_user.email
                                 existing.updated_date = datetime.utcnow()
+                                updated_records.append(existing)
                                 results["updated_records"] += 1
-                                logger.info(f"Updated attendance for {employee_id} on {attendance_date}: {attendance_value}")
                             else:
-                                # Create new record
-                                attendance = Attendance(
-                                    employee_id=employee.employee_id,
-                                    attendance_date=attendance_date,
-                                    attendance_status=attendance_value,
-                                    marked_by=current_user.role,
-                                    created_by=current_user.email,
-                                    created_date=datetime.utcnow()
-                                )
-                                db.session.add(attendance)
+                                # Prepare for bulk insert
+                                new_record = {
+                                    'attendance_id': str(uuid.uuid4()),
+                                    'employee_id': employee.employee_id,
+                                    'attendance_date': attendance_date,
+                                    'attendance_status': attendance_value,
+                                    'marked_by': current_user.role,
+                                    'created_by': current_user.email,
+                                    'created_date': datetime.utcnow(),
+                                    'total_hours_worked': 8.0,
+                                    'overtime_shifts': 0.0,
+                                    'is_approved': True,
+                                    'is_weekend': attendance_date.weekday() >= 5,
+                                    'is_holiday': False  # You can enhance this with holiday check
+                                }
+                                new_attendance_records.append(new_record)
                                 results["new_records"] += 1
-                                logger.info(f"Added new attendance for {employee_id} on {attendance_date}: {attendance_value}")
                             
                             employee_processed = True
                             
-                        else:
-                            results["errors"].append(f"Could not parse date from column {col} for employee {employee_id}")
-                            
                     except Exception as e:
-                        # Log error but continue processing other columns
                         logger.error(f"Error processing column {col} for employee {employee_id}: {str(e)}")
                         results["errors"].append(f"Error processing column {col} for employee {employee_id}: {str(e)}")
                 
@@ -1072,25 +1202,54 @@ def bulk_mark_attendance_excel(current_user):
                 results["failed"] += 1
                 results["processed"] += 1
         
-        # Commit all changes
-        db.session.commit()
+        # Step 6: Execute bulk operations
+        try:
+            # Bulk insert new records
+            if new_attendance_records:
+                logger.info(f"Bulk inserting {len(new_attendance_records)} new records...")
+                bulk_results = safe_bulk_insert(new_attendance_records, chunk_size=1000)
+                results["errors"].extend(bulk_results["errors"])
+            
+            # Commit all changes (updates + new records)
+            db.session.commit()
+            
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"Bulk operation failed: {str(e)}")
+            return jsonify({
+                "success": False,
+                "message": f"Bulk operation failed: {str(e)}"
+            }), 500
+        
+        # Calculate performance metrics
+        end_time = time.time()
+        processing_time = round(end_time - start_time, 2)
         
         return jsonify({
             "success": True,
-            "message": f"Bulk attendance upload completed. Processed {results['processed']} employees, {results['successful']} successful, {results['failed']} failed. Found {len(date_columns)} date columns.",
-            "total_records": results["new_records"] + results["updated_records"],
-            "new_records": results["new_records"],
-            "updated_records": results["updated_records"],
-            "skipped_records": results["skipped_records"],
-            "results": results,
-            "date_columns_processed": len(date_columns)
+            "message": f"Optimized bulk attendance upload completed in {processing_time}s",
+            "performance": {
+                "processing_time_seconds": processing_time,
+                "employees_loaded": len(employee_dict),
+                "existing_records_loaded": len(existing_attendance_dict),
+                "date_columns_processed": len(date_columns)
+            },
+            "results": {
+                "total_records": results["new_records"] + results["updated_records"],
+                "new_records": results["new_records"],
+                "updated_records": results["updated_records"],
+                "skipped_records": results["skipped_records"],
+                "successful_employees": results["successful"],
+                "failed_employees": results["failed"],
+                "errors": results["errors"][:10]  # Limit error list for response size
+            }
         }), 200
         
     except Exception as e:
         db.session.rollback()
         import traceback
         error_details = traceback.format_exc()
-        logger.error(f"Error in bulk-mark-excel: {str(e)}")
+        logger.error(f"Error in optimized bulk-mark-excel: {str(e)}")
         logger.error(f"Traceback: {error_details}")
         return jsonify({
             "success": False,
