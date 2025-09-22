@@ -289,7 +289,7 @@ def download_template():
     try:
         # Create sample data
         sample_data = {
-            'Employee ID': ['910001', '910002'],
+            'Employee ID': ['91510001', '91510002'],
             'Deduction Type': ['Clothes', 'Loan'],
             'Total Amount': [20000, 15000],
             'Months': [9, 6],
@@ -345,6 +345,7 @@ def get_employee_deductions(employee_id):
             'success': False,
             'message': f'Error fetching employee deductions: {str(e)}'
         }), 500
+
 
 
 

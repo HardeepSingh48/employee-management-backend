@@ -298,7 +298,7 @@ def init_database(drop: bool, seed_demo: bool) -> int:
             # Create the employee_id sequence if it doesn't exist
             from sqlalchemy import text
             try:
-                db.session.execute(text("CREATE SEQUENCE IF NOT EXISTS employee_id_seq START WITH 910001 INCREMENT BY 1;"))
+                db.session.execute(text("CREATE SEQUENCE IF NOT EXISTS employee_id_seq START WITH 91510001 INCREMENT BY 1;"))
                 db.session.execute(text("ALTER TABLE employees ALTER COLUMN employee_id SET DEFAULT nextval('employee_id_seq');"))
                 db.session.commit()
                 print("✅ Employee ID sequence created/updated")

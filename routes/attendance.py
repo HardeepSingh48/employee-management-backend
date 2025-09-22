@@ -10,6 +10,8 @@ from io import BytesIO
 from routes.auth import token_required
 import logging
 import os
+import calendar
+
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -29,7 +31,8 @@ STATUS_MAP = {
     'Late': 'Late',
     'Half Day': 'Half Day',
     'Holiday': 'Holiday',
-    'Leave': 'Leave'
+    'Leave': 'Leave',
+    'OFF': 'OFF'
 }
 
 def round_to_half(x):
@@ -57,6 +60,8 @@ def normalize_attendance_value(value):
         return 'Holiday'
     elif v in ['LV', 'LEAVE']:
         return 'Leave'
+    elif v in ['OFF', 'O']:  # Added OFF handling
+        return 'OFF'
     else:
         # Try original mapping as fallback
         return STATUS_MAP.get(v.title())
@@ -797,55 +802,49 @@ def download_attendance_template(current_user):
         return jsonify({"success": False, "message": "Unauthorized"}), 403
     
     try:
-        if current_user.role == 'supervisor':
-            employees = Employee.query.filter_by(site_id=current_user.site_id).all()
-        else:
-            employees = Employee.query.all()
+        # Demo employees data
+        demo_employees = [
+            {'employee_id': '91510000', 'first_name': 'John', 'last_name': 'Doe'},
+           
+        ]
+
+        # Get current month and year
+        current_date = datetime.now()
+        current_month = current_date.month
+        current_year = current_date.year
+        
+        # Get the number of days in current month
+        days_in_month = calendar.monthrange(current_year, current_month)[1]
+        
+        # Generate date columns for current month
+        date_columns = {}
+        for day in range(1, days_in_month + 1):
+            date_str = f"{day:02d}/{current_month:02d}/{current_year}"
+            # Check if this day is Sunday (weekday() returns 6 for Sunday)
+            date_obj = datetime(current_year, current_month, day)
+            if date_obj.weekday() == 6:  # Sunday
+                date_columns[date_str] = 'OFF'
+            else:
+                date_columns[date_str] = ''
 
         template_data = []
-        for emp in employees:
-            template_data.append({
-                'Employee ID': emp.employee_id,
-                'Employee Name': f"{emp.first_name} {emp.last_name}",
-                'Skill Level': '',  # Add this column as it's expected in your file
-                '01/08/2025': '',
-                '02/08/2025': '',
-                '03/08/2025': '',
-                '04/08/2025': '',
-                '05/08/2025': '',
-                # Add more dates for the full month if needed
-                '06/08/2025': '',
-                '07/08/2025': '',
-                '08/08/2025': '',
-                '09/08/2025': '',
-                '10/08/2025': '',
-                '11/08/2025': '',
-                '12/08/2025': '',
-                '13/08/2025': '',
-                '14/08/2025': '',
-                '15/08/2025': '',
-                '16/08/2025': '',
-                '17/08/2025': '',
-                '18/08/2025': '',
-                '19/08/2025': '',
-                '20/08/2025': '',
-                '21/08/2025': '',
-                '22/08/2025': '',
-                '23/08/2025': '',
-                '24/08/2025': '',
-                '25/08/2025': '',
-                '26/08/2025': '',
-                '27/08/2025': '',
-                '28/08/2025': '',
-                '29/08/2025': '',
-                '30/08/2025': '',
-                '31/08/2025': '',
-            })
+        for emp in demo_employees:
+            # Create base employee data
+            employee_row = {
+                'Employee ID': emp['employee_id'],
+                'Employee Name': f"{emp['first_name']} {emp['last_name']}",
+                # 'Skill Level': emp['skill_level'],
+            }
+            
+            # Add all date columns for current month
+            employee_row.update(date_columns)
+            
+            template_data.append(employee_row)
         
         df = pd.DataFrame(template_data)
         output = BytesIO()
         
-        # Use xlsxwriter engine for better compatibility
+        # Use openpyxl engine for better compatibility
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
             df.to_excel(writer, index=False, sheet_name='Attendance')
             
@@ -861,9 +860,13 @@ def download_attendance_template(current_user):
         
         output.seek(0)
 
+        # Include current month/year in filename for clarity
+        month_name = calendar.month_name[current_month]
+        filename = f"attendance_template_{month_name}_{current_year}.xlsx"
+
         return send_file(
             output,
-            download_name="attendance_template.xlsx",
+            download_name=filename,
             as_attachment=True,
             mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
         )

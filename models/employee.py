@@ -8,7 +8,7 @@ class Employee(db.Model):
     # id = db.Column(db.Integer, primary_key=True)
     employee_id = db.Column(
     db.Integer,
-    Sequence('employee_id_seq', start=910001, increment=1),
+    Sequence('employee_id_seq', start=91510001, increment=1),
     primary_key=True,
     unique=True,
     nullable=False
