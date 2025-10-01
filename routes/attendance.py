@@ -674,6 +674,10 @@ def download_attendance_template(current_user):
     if current_user.role not in ['supervisor', 'admin']:
         return jsonify({"success": False, "message": "Unauthorized"}), 403
     
+    # Optional filters from frontend
+    month_param = request.args.get('month', type=int)
+    year_param = request.args.get('year', type=int)
+    site_param = request.args.get('site', type=str)
     try:
         # Demo employees data
         demo_employees = [
@@ -683,8 +687,8 @@ def download_attendance_template(current_user):
 
         # Get current month and year
         current_date = datetime.now()
-        current_month = current_date.month
-        current_year = current_date.year
+        current_month = month_param or current_date.month
+        current_year = year_param or current_date.year
         
         # Get the number of days in current month
         days_in_month = calendar.monthrange(current_year, current_month)[1]
@@ -711,7 +715,8 @@ def download_attendance_template(current_user):
             
             # Add all date columns for current month
             employee_row.update(date_columns)
-            
+            # Add Overtime column placeholder
+            employee_row['Overtime'] = ''
             template_data.append(employee_row)
         
         df = pd.DataFrame(template_data)
@@ -735,7 +740,8 @@ def download_attendance_template(current_user):
 
         # Include current month/year in filename for clarity
         month_name = calendar.month_name[current_month]
-        filename = f"attendance_template_{month_name}_{current_year}.xlsx"
+        safe_site = (site_param or 'site').strip().replace(' ', '_') if site_param else 'site'
+        filename = f"attendance_template_{safe_site}_{month_name}_{current_year}.xlsx"
 
         return send_file(
             output,
@@ -934,6 +940,23 @@ def bulk_mark_attendance_excel(current_user):
                     continue
                 
                 employee_processed = False
+
+                # Optional: read Overtime column (hours or shifts)
+                overtime_shifts_value = 0.0
+                if 'Overtime' in df.columns:
+                    try:
+                        raw_ot = row.get('Overtime')
+                        if pd.notna(raw_ot) and str(raw_ot).strip() != '':
+                            ot_num = float(str(raw_ot).strip())
+                            # If value seems like hours (>2), convert to shifts (8 hours per shift) and round to nearest 0.5
+                            if ot_num > 2:
+                                shifts = ot_num / 8.0
+                            else:
+                                shifts = ot_num
+                            # round to nearest 0.5
+                            overtime_shifts_value = round(shifts * 2) / 2.0
+                    except Exception:
+                        overtime_shifts_value = 0.0
                 
                 # Process each date column for this employee
                 for col in date_columns:
@@ -961,6 +984,9 @@ def bulk_mark_attendance_excel(current_user):
                             if existing:
                                 # Mark for update
                                 existing.attendance_status = attendance_value
+                                # Update overtime if provided
+                                if overtime_shifts_value > 0:
+                                    existing.overtime_shifts = overtime_shifts_value
                                 existing.marked_by = current_user.role
                                 existing.updated_by = current_user.email
                                 existing.updated_date = datetime.utcnow()
@@ -973,11 +999,11 @@ def bulk_mark_attendance_excel(current_user):
                                     'employee_id': employee.employee_id,
                                     'attendance_date': attendance_date,
                                     'attendance_status': attendance_value,
+                                    'overtime_shifts': overtime_shifts_value,
                                     'marked_by': current_user.role,
                                     'created_by': current_user.email,
                                     'created_date': datetime.utcnow(),
                                     'total_hours_worked': 8.0,
-                                    'overtime_shifts': 0.0,
                                     'is_approved': True,
                                     'is_weekend': attendance_date.weekday() >= 5,
                                     'is_holiday': False  # You can enhance this with holiday check
