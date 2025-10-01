@@ -340,12 +340,17 @@ def get_site_attendance(current_user):
         start_date = request.args.get('start_date')
         end_date = request.args.get('end_date')
         employee_id = request.args.get('employee_id')
+        site_id = request.args.get('site_id')
         
         # Build query
         query = Attendance.query.join(Employee)
         
         if current_user.role == 'supervisor':
             query = query.filter(Employee.site_id == current_user.site_id)
+        else:
+            # Admin: optionally filter by provided site_id
+            if site_id:
+                query = query.filter(Employee.site_id == site_id)
         
         if start_date:
             query = query.filter(Attendance.attendance_date >= start_date)
@@ -677,13 +682,16 @@ def download_attendance_template(current_user):
     # Optional filters from frontend
     month_param = request.args.get('month', type=int)
     year_param = request.args.get('year', type=int)
-    site_param = request.args.get('site', type=str)
+    site_param = request.args.get('site_id', type=str)
     try:
-        # Demo employees data
-        demo_employees = [
-            {'employee_id': '91510000', 'first_name': 'John', 'last_name': 'Doe'},
-           
-        ]
+        # Resolve employees for the requested site
+        if site_param:
+            employees = Employee.query.filter_by(site_id=site_param).all()
+        else:
+            if current_user.role == 'supervisor' and current_user.site_id:
+                employees = Employee.query.filter_by(site_id=current_user.site_id).all()
+            else:
+                employees = []
 
         # Get current month and year
         current_date = datetime.now()
@@ -705,11 +713,11 @@ def download_attendance_template(current_user):
                 date_columns[date_str] = ''
 
         template_data = []
-        for emp in demo_employees:
+        for emp in employees:
             # Create base employee data
             employee_row = {
-                'Employee ID': emp['employee_id'],
-                'Employee Name': f"{emp['first_name']} {emp['last_name']}",
+                'Employee ID': getattr(emp, 'employee_id', ''),
+                'Employee Name': f"{getattr(emp, 'first_name', '')} {getattr(emp, 'last_name', '')}".strip(),
                 # 'Skill Level': emp['skill_level'],
             }
             
@@ -774,6 +782,7 @@ def bulk_mark_attendance_excel(current_user):
         file = request.files['file']
         month = request.form.get('month')
         year = request.form.get('year')
+        site_id_param = request.form.get('site_id')
         
         if not file or file.filename == '':
             return jsonify({"success": False, "message": "No file selected"}), 400
@@ -861,20 +870,26 @@ def bulk_mark_attendance_excel(current_user):
         logger.info(f"Excel IDs (first 10): {employee_ids_in_file[:10]}")
 
         try:
+            effective_site_id = current_user.site_id
+            if current_user.role == 'admin' and site_id_param:
+                effective_site_id = site_id_param
             employee_dict = batch_load_employees(
-            employee_ids_in_file,
-            current_user.site_id,
-            current_user.role
-        )
+                employee_ids_in_file,
+                effective_site_id,
+                current_user.role
+            )
             logger.info(f"DB IDs loaded (first 10): {list(employee_dict.keys())[:10]}")
         except Exception as e:
             logger.error(f"❌ Error loading employees from DB: {e}")
             return jsonify({"error": "Failed to load employees from DB"}), 500
 
         logger.info(f"Loading {len(employee_ids_in_file)} employees in batch...")
+        effective_site_id = current_user.site_id
+        if current_user.role == 'admin' and site_id_param:
+            effective_site_id = site_id_param
         employee_dict = batch_load_employees(
             employee_ids_in_file, 
-            current_user.site_id, 
+            effective_site_id, 
             current_user.role
         )
         
