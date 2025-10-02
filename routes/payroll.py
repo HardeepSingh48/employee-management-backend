@@ -554,26 +554,26 @@ def generate_pdf_from_html(html_content: str, filename: str) -> str:
 def preview_payroll(current_user):
     """Preview payroll for selected employees (first 3 only)"""
     try:
+        # Month names for display
+        month_names = ['', 'January', 'February', 'March', 'April', 'May', 'June',
+                      'July', 'August', 'September', 'October', 'November', 'December']
+
         # Get parameters
         employee_ids = request.args.get('employee_ids', '').split(',')
         employee_ids = [int(id.strip()) for id in employee_ids if id.strip().isdigit()]
-        
-        start_date = request.args.get('start_date')
-        end_date = request.args.get('end_date')
-        
+
+        year = request.args.get('year')
+        month = request.args.get('month')
+
         if not employee_ids:
             return jsonify({'success': False, 'message': 'No valid employee IDs provided'}), 400
-        
-        if not start_date or not end_date:
-            return jsonify({'success': False, 'message': 'Start date and end date are required'}), 400
-        
-        # Parse dates
-        start_dt = datetime.strptime(start_date, '%Y-%m-%d').date()
-        end_dt = datetime.strptime(end_date, '%Y-%m-%d').date()
-        
-        # For simplicity, use the start date's month and year
-        year = start_dt.year
-        month = start_dt.month
+
+        if not year or not month:
+            return jsonify({'success': False, 'message': 'Year and month are required'}), 400
+
+        # Parse year and month
+        year = int(year)
+        month = int(month)
         
         # Get employees (limit to first 3 for preview)
         preview_employee_ids = employee_ids[:3]
@@ -607,7 +607,7 @@ def preview_payroll(current_user):
                 'preview_html': html_content,
                 'total_employees': len(employee_ids),
                 'preview_count': len(employees),
-                'period': f"{start_date} to {end_date}"
+                'period': f"{month_names[month-1]} {year}"
             }
         })
         
@@ -643,20 +643,16 @@ def generate_payroll(current_user):
         if not employee_ids:
             return jsonify({'success': False, 'message': 'No employees selected'}), 400
         
-        start_date = data.get('start_date')
-        end_date = data.get('end_date')
+        year = data.get('year')
+        month = data.get('month')
         filename = data.get('filename', f'payslip_{datetime.now().strftime("%Y%m%d_%H%M%S")}.pdf')
-        
-        if not start_date or not end_date:
-            return jsonify({'success': False, 'message': 'Start date and end date are required'}), 400
-        
-        # Parse dates
-        start_dt = datetime.strptime(start_date, '%Y-%m-%d').date()
-        end_dt = datetime.strptime(end_date, '%Y-%m-%d').date()
-        
-        # For simplicity, use the start date's month and year
-        year = start_dt.year
-        month = start_dt.month
+
+        if not year or not month:
+            return jsonify({'success': False, 'message': 'Year and month are required'}), 400
+
+        # Parse year and month
+        year = int(year)
+        month = int(month)
         
         # Get employees
         employees = Employee.query.filter(Employee.employee_id.in_(employee_ids)).all()
@@ -738,7 +734,24 @@ def get_employees_for_payroll(current_user):
         if current_user.role == 'supervisor':
             # Supervisors can only see employees from their assigned site
             if current_user.site_id:
-                query = query.filter_by(site_id=current_user.site_id)
+                # Filter employees based on salary codes that belong to the supervisor's site
+                from models.site import Site
+                from models.wage_master import WageMaster
+
+                site = Site.query.filter_by(site_id=current_user.site_id).first()
+                if site:
+                    # Get salary codes for the supervisor's site
+                    site_salary_codes = WageMaster.query.filter_by(site_name=site.site_name).with_entities(WageMaster.salary_code).all()
+                    site_salary_codes = [code[0] for code in site_salary_codes]
+
+                    if site_salary_codes:
+                        query = query.filter(Employee.salary_code.in_(site_salary_codes))
+                    else:
+                        # No salary codes for this site, return empty result
+                        query = query.filter(False)
+                else:
+                    # Site not found, return empty result
+                    query = query.filter(False)
             else:
                 # If supervisor has no assigned site, return empty list
                 return jsonify({
@@ -748,7 +761,24 @@ def get_employees_for_payroll(current_user):
                 })
         elif site_id:
             # For admin/hr/manager, apply site filter if provided
-            query = query.filter_by(site_id=site_id)
+            # Filter employees based on salary codes that belong to the selected site
+            from models.site import Site
+            from models.wage_master import WageMaster
+
+            site = Site.query.filter_by(site_id=site_id).first()
+            if site:
+                # Get salary codes for the selected site
+                site_salary_codes = WageMaster.query.filter_by(site_name=site.site_name).with_entities(WageMaster.salary_code).all()
+                site_salary_codes = [code[0] for code in site_salary_codes]
+
+                if site_salary_codes:
+                    query = query.filter(Employee.salary_code.in_(site_salary_codes))
+                else:
+                    # No salary codes for this site, return empty result
+                    query = query.filter(False)
+            else:
+                # Site not found, return empty result
+                query = query.filter(False)
         
         employees = query.all()
         

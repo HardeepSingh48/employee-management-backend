@@ -6,16 +6,39 @@ from datetime import datetime
 import pandas as pd
 import io
 import uuid
+from routes.auth import token_required
 
 deductions_bp = Blueprint("deductions", __name__)
 
 @deductions_bp.route("/", methods=["GET"])
-def get_deductions():
+@token_required
+def get_deductions(current_user):
     """Get all deductions with employee details"""
     try:
-        deductions = db.session.query(Deduction, Employee).join(
+        site_id = request.args.get('site_id')
+
+        query = db.session.query(Deduction, Employee).join(
             Employee, Deduction.employee_id == Employee.employee_id
-        ).all()
+        )
+
+        # Apply site filtering if site_id is provided
+        if site_id:
+            from models.site import Site
+            from models.wage_master import WageMaster
+
+            site = Site.query.filter_by(site_id=site_id).first()
+            if site:
+                # Get salary codes for the selected site
+                site_salary_codes = WageMaster.query.filter_by(site_name=site.site_name).with_entities(WageMaster.salary_code).all()
+                site_salary_codes = [code[0] for code in site_salary_codes]
+
+                if site_salary_codes:
+                    query = query.filter(Employee.salary_code.in_(site_salary_codes))
+                else:
+                    # No salary codes for this site, return empty result
+                    query = query.filter(Deduction.employee_id == None)  # This will return no results
+
+        deductions = query.all()
         
         result = []
         for deduction, employee in deductions:
@@ -44,7 +67,8 @@ def get_deductions():
         }), 500
 
 @deductions_bp.route("/", methods=["POST"])
-def create_deduction():
+@token_required
+def create_deduction(current_user):
     """Create a new deduction"""
     try:
         data = request.get_json()
@@ -117,7 +141,8 @@ def create_deduction():
         }), 500
 
 @deductions_bp.route("/<deduction_id>", methods=["PUT"])
-def update_deduction(deduction_id):
+@token_required
+def update_deduction(current_user, deduction_id):
     """Update an existing deduction"""
     try:
         deduction = Deduction.query.filter_by(deduction_id=deduction_id).first()
@@ -167,7 +192,8 @@ def update_deduction(deduction_id):
         }), 500
 
 @deductions_bp.route("/<deduction_id>", methods=["DELETE"])
-def delete_deduction(deduction_id):
+@token_required
+def delete_deduction(current_user, deduction_id):
     """Delete a deduction"""
     try:
         deduction = Deduction.query.filter_by(deduction_id=deduction_id).first()
@@ -193,7 +219,8 @@ def delete_deduction(deduction_id):
         }), 500
 
 @deductions_bp.route("/bulk", methods=["POST"])
-def bulk_upload_deductions():
+@token_required
+def bulk_upload_deductions(current_user):
     """Bulk upload deductions from Excel/CSV file"""
     try:
         file = request.files.get('file')
@@ -284,7 +311,8 @@ def bulk_upload_deductions():
         }), 500
 
 @deductions_bp.route("/template", methods=["GET"])
-def download_template():
+@token_required
+def download_template(current_user):
     """Download Excel template for bulk upload"""
     try:
         # Create sample data
@@ -317,7 +345,8 @@ def download_template():
         }), 500
 
 @deductions_bp.route("/employee/<employee_id>", methods=["GET"])
-def get_employee_deductions(employee_id):
+@token_required
+def get_employee_deductions(current_user, employee_id):
     """Get all deductions for a specific employee"""
     try:
         deductions = Deduction.query.filter_by(employee_id=employee_id).all()
