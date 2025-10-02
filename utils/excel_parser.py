@@ -2,18 +2,18 @@ import pandas as pd
 
 # Basic required columns that should be present in any format
 BASIC_REQUIRED_COLUMNS = [
-    "Full Name", "Date of Birth", "Gender"
+    "Full Name"
 ]
 
 # Old format required columns (legacy support)
 OLD_FORMAT_REQUIRED_COLUMNS = [
-    "Full Name", "Date of Birth", "Gender",
+    "Full Name",
     "Site Name", "Rank", "State", "Base Salary"
 ]
 
 # New format required columns (comprehensive employee data)
 NEW_FORMAT_REQUIRED_COLUMNS = [
-    "Full Name", "Date of Birth", "Gender", "Marital Status",
+    "Full Name", "Marital Status",
     "Permanent Address", "Mobile Number", "Aadhaar Number",
     "PAN Card Number", "Date of Joining", "Employment Type",
     "Department", "Designation", "Work Location", "Salary Code"
