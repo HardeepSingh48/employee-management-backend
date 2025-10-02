@@ -62,15 +62,48 @@ def create_salary_code_alt():
 @salary_codes_bp.route("", methods=["GET", "OPTIONS"])
 @cors_enabled
 def list_salary_codes():
-    """List all active salary codes"""
-    # print(f"🔍 Salary codes endpoint - Received {request.method} request to {request.url}")
-    # print(f"🔍 Request headers: {dict(request.headers)}")
+    """List active salary codes with optional search and pagination.
 
+    Query params:
+      - search: optional string, case-insensitive; matches salary_code and site_name
+      - page: optional int (defaults to 1)
+      - per_page / limit: optional int (defaults to return all if not provided)
+    """
     try:
-        wage_masters = WageMaster.query.filter_by(is_active=True).all()
-        
+        # Read query params
+        search_term = (request.args.get('search') or '').strip()
+        # Support both per_page and limit as aliases
+        per_page = request.args.get('per_page', type=int)
+        if per_page is None:
+            per_page = request.args.get('limit', type=int)
+        page = request.args.get('page', default=1, type=int)
+
+        # Base query: only active
+        query = WageMaster.query.filter_by(is_active=True)
+
+        # Apply search across available fields
+        if search_term:
+            like = f"%{search_term}%"
+            query = query.filter(
+                db.or_(
+                    WageMaster.salary_code.ilike(like),
+                    WageMaster.site_name.ilike(like)
+                )
+            )
+
+        # Apply pagination if per_page provided, else return all
+        if per_page and per_page > 0:
+            paginated = query.paginate(page=page, per_page=per_page, error_out=False)
+            items = paginated.items
+            total = paginated.total
+            pages = paginated.pages
+        else:
+            items = query.all()
+            total = len(items)
+            pages = 1
+
         salary_codes = []
-        for wage in wage_masters:
+        for wage in items:
             salary_codes.append({
                 "id": wage.id,
                 "salary_code": wage.salary_code,
@@ -83,13 +116,24 @@ def list_salary_codes():
                 "created_at": wage.created_at.isoformat() if wage.created_at else None,
                 "display_name": f"{wage.salary_code} - {wage.site_name} | {wage.rank} | {wage.state} (₹{wage.base_wage})"
             })
-        
-        return jsonify({
+
+        response_payload = {
             "success": True,
             "data": salary_codes,
-            "count": len(salary_codes),
-            "message": f"Found {len(salary_codes)} salary codes"
-        }), 200
+            "count": total,
+            "message": f"Found {total} salary codes"
+        }
+
+        # Include pagination metadata when applicable
+        if per_page and per_page > 0:
+            response_payload["pagination"] = {
+                "page": page,
+                "per_page": per_page,
+                "total": total,
+                "pages": pages
+            }
+
+        return jsonify(response_payload), 200
     except Exception as e:
         return jsonify({"success": False, "message": str(e)}), 400
 

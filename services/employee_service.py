@@ -7,9 +7,9 @@ from models.site import Site
 from datetime import datetime
 
 def create_employee(payload: dict) -> Employee:
-    # Get or create salary code if wage master details are provided
-    salary_code = None
-    if all(k in payload for k in ("site_name", "rank", "state", "base_salary")):
+    # Get salary code from payload or create if wage master details are provided
+    salary_code = payload.get("salary_code")
+    if not salary_code and all(k in payload for k in ("site_name", "rank", "state", "base_salary")):
         salary_code = _get_or_create_wage_master(
             payload.get("site_name"),
             payload.get("rank"),
