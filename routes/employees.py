@@ -142,13 +142,14 @@ def parse_boolean(value):
     return bool(value)
 
 def split_full_name(full_name):
-    """Split full name into first and last name"""
+    """Split full name into first and last name - matches old working implementation"""
     if not full_name or pd.isna(full_name):
-        return None, None
-    
-    parts = str(full_name).strip().split(maxsplit=1)
-    first_name = parts[0] if len(parts) > 0 else None
-    last_name = parts[1] if len(parts) > 1 else None
+        return "", ""
+
+    full_name = str(full_name).strip()
+    name_parts = full_name.split(" ", 1)
+    first_name = name_parts[0] if name_parts else ""
+    last_name = name_parts[1] if len(name_parts) > 1 else ""
     return first_name, last_name
 
 def parse_date(date_value):
@@ -187,31 +188,105 @@ def bulk_upload_optimized():
     CHUNK_SIZE = 500  # Process in batches of 500
     
     try:
-        # Read Excel file
-        df = pd.read_excel(file_path, engine='openpyxl')
-        
+        # Read Excel file - try different approaches
+        try:
+            # First try with openpyxl
+            xl = pd.ExcelFile(file_path, engine='openpyxl')
+        except Exception as e1:
+            try:
+                # Fallback to xlrd for older .xls files
+                xl = pd.ExcelFile(file_path, engine='xlrd')
+            except Exception as e2:
+                return jsonify({
+                    "success": False,
+                    "message": f"Could not read Excel file. Tried openpyxl: {str(e1)}, xlrd: {str(e2)}"
+                }), 400
+
+        # Debug: Check all sheets
+        print(f"DEBUG: Available sheets: {xl.sheet_names}")
+
+        # Try to find a sheet with data
+        df = None
+        sheet_info = []
+
+        for sheet_name in xl.sheet_names:
+            try:
+                temp_df = xl.parse(sheet_name)
+                info = {
+                    "sheet_name": sheet_name,
+                    "rows": len(temp_df),
+                    "columns": len(temp_df.columns),
+                    "column_names": list(temp_df.columns) if len(temp_df.columns) > 0 else []
+                }
+                sheet_info.append(info)
+                print(f"DEBUG: Sheet '{sheet_name}': {info['rows']} rows, {info['columns']} columns")
+
+                # Use the first sheet with any data
+                if len(temp_df) > 0:
+                    df = temp_df
+                    print(f"DEBUG: Using sheet: {sheet_name}")
+                    break
+            except Exception as e:
+                print(f"DEBUG: Could not parse sheet {sheet_name}: {e}")
+                sheet_info.append({
+                    "sheet_name": sheet_name,
+                    "error": str(e)
+                })
+                continue
+
+        if df is None:
+            return jsonify({
+                "success": False,
+                "message": "Could not find any data in the Excel file. All sheets appear to be empty.",
+                "debug_info": {
+                    "sheets_found": sheet_info
+                }
+            }), 400
+
         total_rows = len(df)
         inserted = 0
         errors = []
-        
-        # Validate required columns
-        required_columns = [
-            'Full Name', 'Marital Status', 'Permanent Address', 
-            'Mobile Number', 'Aadhaar Number', 'PAN Card Number',
-            'Date of Joining', 'Employment Type', 'Department',
-            'Designation', 'Work Location', 'Salary Code',
-            'Bank Account Number', 'Bank Name', 'IFSC Code',
-            'Highest Qualification', 'Year of Passing',
-            'Experience Duration', 'Emergency Contact Name',
-            'Emergency Relationship', 'Emergency Phone Number'
+
+        # Debug: Print what we found
+        print(f"DEBUG: Total rows in Excel: {total_rows}")
+        print(f"DEBUG: Columns found: {list(df.columns)}")
+        print(f"DEBUG: Data types: {df.dtypes.to_dict()}")
+        print(f"DEBUG: First few rows:")
+        print(df.head(3))
+        print(f"DEBUG: Shape: {df.shape}")
+
+        # Only require essential columns - make most fields optional
+        essential_columns = ['Full Name']  # Only Full Name is absolutely required
+
+        recommended_columns = [
+            'Marital Status', 'Permanent Address', 'Mobile Number', 'Aadhaar Number',
+            'PAN Card Number', 'Date of Joining', 'Employment Type', 'Department',
+            'Designation', 'Work Location', 'Salary Code', 'Bank Account Number',
+            'Bank Name', 'IFSC Code', 'Highest Qualification', 'Year of Passing',
+            'Experience Duration', 'Emergency Contact Name', 'Emergency Relationship',
+            'Emergency Phone Number', 'Employee Id', 'UAN Number'
         ]
-        
-        missing_columns = [col for col in required_columns if col not in df.columns]
-        if missing_columns:
+
+        found_columns = list(df.columns)
+        missing_essential = [col for col in essential_columns if col not in df.columns]
+
+        if missing_essential:
             return jsonify({
                 "success": False,
-                "message": f"Missing required columns: {', '.join(missing_columns)}"
+                "message": f"Missing essential columns: {', '.join(missing_essential)}",
+                "debug_info": {
+                    "total_rows": total_rows,
+                    "columns_found": found_columns,
+                    "essential_columns": essential_columns,
+                    "recommended_columns": recommended_columns
+                }
             }), 400
+
+        # Warn about missing recommended columns but don't fail
+        missing_recommended = [col for col in recommended_columns if col not in df.columns]
+        if missing_recommended:
+            print(f"WARNING: Missing recommended columns: {', '.join(missing_recommended)}")
+            print("These fields will use default values")
         
         # Process in chunks for better memory management
         for chunk_start in range(0, total_rows, CHUNK_SIZE):
@@ -223,84 +298,127 @@ def bulk_upload_optimized():
             
             for idx, row in chunk_df.iterrows():
                 try:
-                    # Parse full name
+                    # Parse full name - matches old implementation
                     first_name, last_name = split_full_name(row.get('Full Name'))
-                    if not first_name or not last_name:
+                    if not first_name:
                         errors.append({
                             "row": idx + 2,  # +2 for Excel row (header + 0-index)
-                            "error": "Invalid Full Name - must contain first and last name"
+                            "error": "First Name is required"
                         })
                         continue
-                    
-                    # Validate required fields
-                    if pd.isna(row.get('Mobile Number')) or not str(row.get('Mobile Number')).strip():
-                        errors.append({
-                            "row": idx + 2,
-                            "error": "Mobile Number is required"
-                        })
-                        continue
-                    
-                    # Parse dates
-                    date_of_birth = parse_date(row.get('Date of Birth'))
-                    date_of_joining = parse_date(row.get('Date of Joining'))
-                    
-                    if not date_of_joining:
-                        errors.append({
-                            "row": idx + 2,
-                            "error": "Invalid Date of Joining format"
-                        })
-                        continue
-                    
-                    # Prepare employee data
+
+                    # Use provided Employee Id if available, otherwise let database generate it
+                    custom_employee_id = None
+                    if 'Employee Id' in df.columns and not pd.isna(row.get('Employee Id')):
+                        custom_employee_id = int(row.get('Employee Id'))
+
+                    # Provide defaults for missing fields
                     employee_data = {
                         'first_name': first_name,
                         'last_name': last_name,
-                        'father_name': row.get('Father Name') if not pd.isna(row.get('Father Name')) else None,
-                        'date_of_birth': date_of_birth,
-                        'gender': row.get('Gender') if not pd.isna(row.get('Gender')) else None,
-                        'marital_status': str(row.get('Marital Status', '')).strip(),
-                        'nationality': row.get('Nationality', 'Indian'),
-                        'blood_group': row.get('Blood Group') if not pd.isna(row.get('Blood Group')) else None,
-                        'address': str(row.get('Permanent Address', '')).strip(),
-                        'phone_number': str(row.get('Mobile Number', '')).strip(),
-                        'alternate_contact_number': str(row.get('Alternate Contact Number', '')).strip() if not pd.isna(row.get('Alternate Contact Number')) else None,
-                        'adhar_number': str(row.get('Aadhaar Number', '')).strip(),
-                        'pan_card_number': str(row.get('PAN Card Number', '')).strip(),
-                        'voter_id_driving_license': str(row.get('Voter ID / Driving License', '')).strip() if not pd.isna(row.get('Voter ID / Driving License')) else None,
-                        'uan': str(row.get('UAN', '')).strip() if not pd.isna(row.get('UAN')) else None,
-                        'esic_number': str(row.get('ESIC Number', '')).strip() if not pd.isna(row.get('ESIC Number')) else None,
-                        'hire_date': date_of_joining,
-                        'employment_type': str(row.get('Employment Type', '')).strip(),
-                        'department_id': str(row.get('Department', '')).strip(),
-                        'designation': str(row.get('Designation', '')).strip(),
-                        'work_location': str(row.get('Work Location', '')).strip(),
-                        'reporting_manager': str(row.get('Reporting Manager', '')).strip() if not pd.isna(row.get('Reporting Manager')) else None,
-                        'salary_code': str(row.get('Salary Code', '')).strip(),
-                        'skill_category': str(row.get('Skill Category', '')).strip() if not pd.isna(row.get('Skill Category')) else None,
-                        'pf_applicability': parse_boolean(row.get('PF Applicability', False)),
-                        'esic_applicability': parse_boolean(row.get('ESIC Applicability', False)),
-                        'professional_tax_applicability': parse_boolean(row.get('Professional Tax Applicability', False)),
-                        'salary_advance_loan': float(row.get('Salary Advance/Loan', 0)) if not pd.isna(row.get('Salary Advance/Loan')) else 0,
-                        'highest_qualification': str(row.get('Highest Qualification', '')).strip(),
-                        'year_of_passing': str(row.get('Year of Passing', '')).strip(),
-                        'additional_certifications': str(row.get('Additional Certifications', '')).strip() if not pd.isna(row.get('Additional Certifications')) else None,
-                        'experience_duration': str(row.get('Experience Duration', '')).strip(),
-                        'emergency_contact_name': str(row.get('Emergency Contact Name', '')).strip(),
-                        'emergency_contact_relationship': str(row.get('Emergency Relationship', '')).strip(),
-                        'emergency_contact_phone': str(row.get('Emergency Phone Number', '')).strip(),
+                        'father_name': None,
+                        'date_of_birth': None,
+                        'gender': None,
+                        'marital_status': 'Single',  # Default
+                        'nationality': 'Indian',
+                        'blood_group': None,
+                        'address': 'Not Provided',  # Default address
+                        'phone_number': '9999999999',  # Default phone - will be updated later
+                        'alternate_contact_number': None,
+                        'adhar_number': '000000000000',  # Default Aadhaar
+                        'pan_card_number': 'AAAAA0000A',  # Default PAN
+                        'voter_id_driving_license': None,
+                        'uan': str(row.get('UAN Number', '')).strip() if 'UAN Number' in df.columns and not pd.isna(row.get('UAN Number')) else None,
+                        'esic_number': None,
+                        'hire_date': datetime.utcnow().date(),  # Default to today
+                        'employment_type': 'Full-time',  # Default
+                        'department_id': 'IT',  # Default department (exists in database)
+                        'designation': 'Employee',  # Default designation
+                        'work_location': 'Main Office',  # Default
+                        'reporting_manager': None,
+                        'salary_code': str(row.get('Salary Code', '')).strip() if 'Salary Code' in df.columns and not pd.isna(row.get('Salary Code')) else 'DEFAULT',
+                        'skill_category': None,
+                        'pf_applicability': False,
+                        'esic_applicability': False,
+                        'professional_tax_applicability': False,
+                        'salary_advance_loan': 0,
+                        'highest_qualification': 'Not Specified',  # Default
+                        'year_of_passing': '2020',  # Default
+                        'additional_certifications': None,
+                        'experience_duration': '0 years',  # Default
+                        'emergency_contact_name': f'{first_name} Contact',  # Default
+                        'emergency_contact_relationship': 'Relative',  # Default
+                        'emergency_contact_phone': '9999999999',  # Default
                         'employment_status': 'Active',
                         'created_date': datetime.utcnow()
                     }
+
+                    # Override defaults with provided values if available
+                    if 'Marital Status' in df.columns and not pd.isna(row.get('Marital Status')):
+                        employee_data['marital_status'] = str(row.get('Marital Status')).strip()
+
+                    if 'Permanent Address' in df.columns and not pd.isna(row.get('Permanent Address')):
+                        employee_data['address'] = str(row.get('Permanent Address')).strip()
+
+                    if 'Mobile Number' in df.columns and not pd.isna(row.get('Mobile Number')):
+                        phone = str(row.get('Mobile Number')).strip()
+                        if phone:
+                            employee_data['phone_number'] = phone
+
+                    if 'Aadhaar Number' in df.columns and not pd.isna(row.get('Aadhaar Number')):
+                        aadhaar = str(row.get('Aadhaar Number')).strip()
+                        if aadhaar:
+                            employee_data['adhar_number'] = aadhaar
+
+                    if 'PAN Card Number' in df.columns and not pd.isna(row.get('PAN Card Number')):
+                        pan = str(row.get('PAN Card Number')).strip()
+                        if pan:
+                            employee_data['pan_card_number'] = pan
+
+                    if 'Date of Joining' in df.columns:
+                        date_joining = parse_date(row.get('Date of Joining'))
+                        if date_joining:
+                            employee_data['hire_date'] = date_joining
+
+                    if 'Employment Type' in df.columns and not pd.isna(row.get('Employment Type')):
+                        employee_data['employment_type'] = str(row.get('Employment Type')).strip()
+
+                    if 'Department' in df.columns and not pd.isna(row.get('Department')):
+                        employee_data['department_id'] = str(row.get('Department')).strip()
+
+                    if 'Designation' in df.columns and not pd.isna(row.get('Designation')):
+                        employee_data['designation'] = str(row.get('Designation')).strip()
+
+                    if 'Work Location' in df.columns and not pd.isna(row.get('Work Location')):
+                        employee_data['work_location'] = str(row.get('Work Location')).strip()
+
+                    # Handle custom employee ID if provided
+                    if custom_employee_id:
+                        employee_data['employee_id'] = custom_employee_id
                     
                     employees_to_insert.append(employee_data)
-                    
-                    # Prepare account data (will be linked after employee creation)
+
+                    # Prepare account data with defaults (will be linked after employee creation)
                     account_data = {
-                        'account_number': str(row.get('Bank Account Number', '')).strip(),
-                        'bank_name': str(row.get('Bank Name', '')).strip(),
-                        'ifsc_code': str(row.get('IFSC Code', '')).strip(),
-                        'branch_name': str(row.get('Branch Name', '')).strip() if not pd.isna(row.get('Branch Name')) else None,
+                        'account_number': '000000000000',  # Default account number
+                        'bank_name': 'Not Specified',  # Default bank
+                        'ifsc_code': 'XXXX0000000',  # Default IFSC
+                        'branch_name': None,
                     }
+
+                    # Override with provided values if available
+                    if 'Bank Account Number' in df.columns and not pd.isna(row.get('Bank Account Number')):
+                        account_data['account_number'] = str(row.get('Bank Account Number')).strip()
+
+                    if 'Bank Name' in df.columns and not pd.isna(row.get('Bank Name')):
+                        account_data['bank_name'] = str(row.get('Bank Name')).strip()
+
+                    if 'IFSC Code' in df.columns and not pd.isna(row.get('IFSC Code')):
+                        account_data['ifsc_code'] = str(row.get('IFSC Code')).strip()
+
+                    if 'Branch Name' in df.columns and not pd.isna(row.get('Branch Name')):
+                        account_data['branch_name'] = str(row.get('Branch Name')).strip()
+
                     accounts_to_insert.append(account_data)
                     
                 except Exception as e:
@@ -310,62 +428,77 @@ def bulk_upload_optimized():
                     })
                     continue
             
-            # Bulk insert employees using SQLAlchemy Core for performance
+            # Insert employees - handle custom IDs carefully
             if employees_to_insert:
                 try:
-                    # Use bulk_insert_mappings for better performance
-                    db.session.bulk_insert_mappings(Employee, employees_to_insert)
-                    db.session.flush()
-                    
-                    # Get the inserted employee IDs
-                    # Query back the employees we just inserted (by matching unique fields)
-                    phone_numbers = [emp['phone_number'] for emp in employees_to_insert]
-                    inserted_employees = Employee.query.filter(
-                        Employee.phone_number.in_(phone_numbers)
-                    ).all()
-                    
-                    # Create mapping of phone to employee_id
-                    phone_to_emp_id = {emp.phone_number: emp.employee_id for emp in inserted_employees}
-                    
-                    # Link accounts to employees
-                    accounts_with_emp_id = []
-                    for i, account in enumerate(accounts_to_insert):
-                        phone = employees_to_insert[i]['phone_number']
-                        if phone in phone_to_emp_id:
-                            account['emp_id'] = phone_to_emp_id[phone]
-                            accounts_with_emp_id.append(account)
-                    
-                    # Bulk insert accounts
-                    if accounts_with_emp_id:
-                        db.session.bulk_insert_mappings(AccountDetails, accounts_with_emp_id)
-                    
-                    db.session.commit()
-                    inserted += len(employees_to_insert)
-                    
-                except Exception as e:
-                    db.session.rollback()
-                    # If bulk insert fails, try individual inserts for this chunk
+                    # Separate employees with and without custom IDs
+                    custom_id_employees = []
+                    auto_id_employees = []
+
                     for i, emp_data in enumerate(employees_to_insert):
+                        if 'employee_id' in emp_data:
+                            custom_id_employees.append((i, emp_data))
+                        else:
+                            auto_id_employees.append((i, emp_data))
+
+                    # Insert employees with custom IDs first (individual inserts)
+                    custom_accounts = []
+                    for i, emp_data in custom_id_employees:
                         try:
                             emp = Employee(**emp_data)
                             db.session.add(emp)
                             db.session.flush()
-                            
-                            # Add account
-                            account = AccountDetails(
-                                emp_id=emp.employee_id,
-                                **accounts_to_insert[i]
-                            )
-                            db.session.add(account)
-                            db.session.commit()
+
+                            # Prepare account for this employee
+                            account_data = accounts_to_insert[i].copy()
+                            account_data['emp_id'] = emp.employee_id
+                            custom_accounts.append(account_data)
                             inserted += 1
-                            
-                        except Exception as individual_error:
+
+                        except Exception as e:
                             db.session.rollback()
                             errors.append({
                                 "row": chunk_start + i + 2,
-                                "error": str(individual_error)
+                                "error": f"Failed to insert employee with custom ID: {str(e)}"
                             })
+
+                    # Bulk insert employees with auto-generated IDs
+                    if auto_id_employees:
+                        auto_emp_data = [emp_data for i, emp_data in auto_id_employees]
+                        db.session.bulk_insert_mappings(Employee, auto_emp_data)
+                        db.session.flush()
+
+                        # Get the inserted employee IDs
+                        phone_numbers = [emp_data['phone_number'] for emp_data in auto_emp_data]
+                        inserted_employees = Employee.query.filter(
+                            Employee.phone_number.in_(phone_numbers)
+                        ).all()
+
+                        # Create mapping of phone to employee_id
+                        phone_to_emp_id = {emp.phone_number: emp.employee_id for emp in inserted_employees}
+
+                        # Link accounts to auto-ID employees
+                        for i, emp_data in auto_id_employees:
+                            phone = emp_data['phone_number']
+                            if phone in phone_to_emp_id:
+                                account_data = accounts_to_insert[i].copy()
+                                account_data['emp_id'] = phone_to_emp_id[phone]
+                                custom_accounts.append(account_data)
+
+                        inserted += len(auto_id_employees)
+
+                    # Insert all accounts
+                    if custom_accounts:
+                        db.session.bulk_insert_mappings(AccountDetails, custom_accounts)
+
+                    db.session.commit()
+
+                except Exception as e:
+                    db.session.rollback()
+                    errors.append({
+                        "row": chunk_start + 1,
+                        "error": f"Chunk insert failed: {str(e)}"
+                    })
         
         return jsonify({
             "success": True,

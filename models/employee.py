@@ -1,9 +1,28 @@
 from models import db
 from sqlalchemy.sql import func
-from sqlalchemy import Sequence
+from sqlalchemy import Sequence, Index
 
 class Employee(db.Model):
     __tablename__ = "employees"
+
+    # Add indexes for frequently queried fields
+    __table_args__ = (
+        # Composite index for bulk lookups
+        Index('idx_employee_phone_email', 'phone_number', 'email'),
+
+        # Individual indexes for search operations
+        Index('idx_employee_phone', 'phone_number'),
+        Index('idx_employee_email', 'email'),
+        Index('idx_employee_adhar', 'adhar_number'),
+        Index('idx_employee_pan', 'pan_card_number'),
+        Index('idx_employee_name', 'first_name', 'last_name'),
+        Index('idx_employee_department', 'department_id'),
+        Index('idx_employee_status', 'employment_status'),
+        Index('idx_employee_site', 'site_id'),
+
+        # For date range queries
+        Index('idx_employee_hire_date', 'hire_date'),
+    )
 
     # id = db.Column(db.Integer, primary_key=True)
     employee_id = db.Column(

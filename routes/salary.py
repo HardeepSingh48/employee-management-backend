@@ -56,6 +56,7 @@ def calculate_monthly_salary():
 
         year = data.get('year')
         month = data.get('month')
+        site_id = data.get('site_id')  # Optional site filter
 
         if not year or not month:
             return jsonify({
@@ -64,7 +65,7 @@ def calculate_monthly_salary():
             }), 400
 
         # Generate salary data using database records
-        result = SalaryService.generate_monthly_salary_data(year, month)
+        result = SalaryService.generate_monthly_salary_data(year, month, site_id)
 
         if result['success']:
             return jsonify(result), 200
