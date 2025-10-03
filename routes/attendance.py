@@ -676,22 +676,28 @@ def bulk_upload_attendance(current_user):
 @attendance_bp.route("/template", methods=["GET"])
 @token_required
 def download_attendance_template(current_user):
-    if current_user.role not in ['supervisor', 'admin']:
+    if current_user.role not in ['supervisor', 'admin', 'superadmin']:
         return jsonify({"success": False, "message": "Unauthorized"}), 403
     
     # Optional filters from frontend
     month_param = request.args.get('month', type=int)
     year_param = request.args.get('year', type=int)
     site_param = request.args.get('site_id', type=str)
+    logger.info(f"Template request - month: {month_param}, year: {year_param}, site: {site_param}, user_role: {current_user.role}")
+    
     try:
         # Resolve employees for the requested site
         if site_param:
             employees = Employee.query.filter_by(site_id=site_param).all()
+            logger.info(f"Loading employees for site {site_param}: {len(employees)} found")
         else:
             if current_user.role == 'supervisor' and current_user.site_id:
                 employees = Employee.query.filter_by(site_id=current_user.site_id).all()
+                logger.info(f"Loading employees for supervisor site {current_user.site_id}: {len(employees)} found")
             else:
-                employees = []
+                # For admin users without site filter, load all employees
+                employees = Employee.query.all()
+                logger.info(f"Loading all employees for admin: {len(employees)} found")
 
         # Get current month and year
         current_date = datetime.now()
@@ -712,43 +718,65 @@ def download_attendance_template(current_user):
             else:
                 date_columns[date_str] = ''
 
+        # Define all columns in order
+        all_columns = ['Employee ID', 'Employee Name'] + list(date_columns.keys()) + ['Overtime']
+        
         template_data = []
+        logger.info(f"Generating template for {len(employees)} employees, {len(date_columns)} date columns")
+        
         for emp in employees:
             # Create base employee data
             employee_row = {
                 'Employee ID': getattr(emp, 'employee_id', ''),
                 'Employee Name': f"{getattr(emp, 'first_name', '')} {getattr(emp, 'last_name', '')}".strip(),
-                # 'Skill Level': emp['skill_level'],
             }
-            
+
             # Add all date columns for current month
             employee_row.update(date_columns)
             # Add Overtime column placeholder
             employee_row['Overtime'] = ''
             template_data.append(employee_row)
+
+        # Create DataFrame with explicit columns to preserve headers even when empty
+        if template_data:
+            df = pd.DataFrame(template_data)
+        else:
+            # Create empty DataFrame with headers when no employees
+            df = pd.DataFrame(columns=all_columns)
+            logger.warning("No employees found, creating template with headers only")
         
-        df = pd.DataFrame(template_data)
+        logger.info(f"Created DataFrame with shape: {df.shape}")
+        logger.info(f"DataFrame columns: {list(df.columns)[:5]}... (showing first 5)")
+        
+        # Create Excel file in memory
         output = BytesIO()
         
-        # Use openpyxl engine for better compatibility
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            df.to_excel(writer, index=False, sheet_name='Attendance')
-            
-            # Get the workbook and worksheet
-            workbook = writer.book
-            worksheet = writer.sheets['Attendance']
-            
-            # Auto-adjust column widths
-            for column in df:
-                column_length = max(df[column].astype(str).map(len).max(), len(column))
-                col_idx = df.columns.get_loc(column)
-                worksheet.column_dimensions[worksheet.cell(1, col_idx + 1).column_letter].width = min(column_length + 2, 20)
+        # Write to Excel
+        writer = pd.ExcelWriter(output, engine='openpyxl')
+        df.to_excel(writer, index=False, sheet_name='Attendance')
         
+        # Get the workbook and worksheet for formatting
+        workbook = writer.book
+        worksheet = writer.sheets['Attendance']
+        
+        # Auto-adjust column widths
+        for idx, column in enumerate(df.columns, 1):
+            if len(df) > 0:
+                column_length = max(df[column].astype(str).map(len).max(), len(str(column)))
+            else:
+                column_length = len(str(column))
+            col_letter = worksheet.cell(1, idx).column_letter
+            worksheet.column_dimensions[col_letter].width = min(column_length + 2, 20)
+        
+        # Save and close the writer
+        writer.close()
+        
+        # Seek to beginning of the stream
         output.seek(0)
 
         # Include current month/year in filename for clarity
         month_name = calendar.month_name[current_month]
-        safe_site = (site_param or 'site').strip().replace(' ', '_') if site_param else 'site'
+        safe_site = (site_param or 'all').strip().replace(' ', '_') if site_param else 'all'
         filename = f"attendance_template_{safe_site}_{month_name}_{current_year}.xlsx"
 
         return send_file(
@@ -759,11 +787,12 @@ def download_attendance_template(current_user):
         )
         
     except Exception as e:
-        logger.error(f"Error generating template: {str(e)}")
+        logger.error(f"Error generating template: {str(e)}", exc_info=True)
         return jsonify({
             "success": False,
             "message": f"Error generating template: {str(e)}"
         }), 500
+        
 
 @attendance_bp.route("/bulk-mark-excel", methods=["POST"])
 @token_required
