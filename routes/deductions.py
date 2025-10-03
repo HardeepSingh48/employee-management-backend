@@ -104,6 +104,16 @@ def create_deduction(current_user):
                 'success': False,
                 'message': 'Invalid start_month format. Use YYYY-MM-DD'
             }), 400
+
+        # Validate start_month is not in the past (current month or later)
+        current_date = datetime.now().date()
+        current_month_start = current_date.replace(day=1)  # First day of current month
+
+        if start_month < current_month_start:
+            return jsonify({
+                'success': False,
+                'message': 'Start month cannot be in the past. Please select current month or a future month.'
+            }), 400
         
         # Create deduction
         deduction = Deduction(
@@ -169,6 +179,17 @@ def update_deduction(current_user, deduction_id):
         if 'start_month' in data:
             try:
                 start_month = datetime.strptime(data['start_month'], '%Y-%m-%d').date()
+
+                # Validate start_month is not in the past (current month or later)
+                current_date = datetime.now().date()
+                current_month_start = current_date.replace(day=1)  # First day of current month
+
+                if start_month < current_month_start:
+                    return jsonify({
+                        'success': False,
+                        'message': 'Start month cannot be in the past. Please select current month or a future month.'
+                    }), 400
+
                 deduction.start_month = start_month
             except ValueError:
                 return jsonify({

@@ -22,11 +22,23 @@ logger = logging.getLogger(__name__)
 attendance_bp = Blueprint("attendance", __name__)
 
 def batch_load_employees(employee_ids, site_id=None, user_role='admin'):
-    """Load employees in batch with site filtering"""
-    query = Employee.query.filter(Employee.employee_id.in_(employee_ids))
+    """Load employees in batch with site filtering through salary codes"""
     if user_role == 'supervisor' and site_id:
-        query = query.filter(Employee.site_id == site_id)
-    
+        # For supervisors, filter by site through salary code relationships
+        from models.wage_master import WageMaster
+        from models.site import Site
+        query = Employee.query.join(
+            WageMaster, Employee.salary_code == WageMaster.salary_code
+        ).join(
+            Site, WageMaster.site_name == Site.site_name
+        ).filter(
+            Employee.employee_id.in_(employee_ids),
+            Site.site_id == site_id
+        )
+    else:
+        # For admins or when no site filtering, just filter by employee IDs
+        query = Employee.query.filter(Employee.employee_id.in_(employee_ids))
+
     employees = query.all()
     return {str(emp.employee_id).strip(): emp for emp in employees}
 
@@ -145,11 +157,19 @@ def mark_attendance(current_user):
         if not employee_id:
             return jsonify({"success": False, "message": "Employee ID is required"}), 400
 
-        # For supervisors, verify employee belongs to their site
+        # For supervisors, verify employee belongs to their site through salary codes
         if current_user.role == 'supervisor':
-            from models.employee import Employee
-            employee = Employee.query.filter_by(employee_id=employee_id).first()
-            if not employee or employee.site_id != current_user.site_id:
+            from models.wage_master import WageMaster
+            from models.site import Site
+            employee = Employee.query.join(
+                WageMaster, Employee.salary_code == WageMaster.salary_code
+            ).join(
+                Site, WageMaster.site_name == Site.site_name
+            ).filter(
+                Employee.employee_id == employee_id,
+                Site.site_id == current_user.site_id
+            ).first()
+            if not employee:
                 return jsonify({"success": False, "message": "Employee not found or not in your site"}), 403
 
         # Optional fields with defaults
@@ -229,11 +249,18 @@ def bulk_mark_attendance(current_user):
         attendance_records = data['attendance_records']
         marked_by = current_user.role
 
-        # For supervisors, verify all employees belong to their site
+        # For supervisors, verify all employees belong to their site through salary codes
         if current_user.role == 'supervisor':
             for record in attendance_records:
-                employee = Employee.query.filter_by(employee_id=record.get('employee_id')).first()
-                if not employee or employee.site_id != current_user.site_id:
+                employee = Employee.query.join(
+                    WageMaster, Employee.salary_code == WageMaster.salary_code
+                ).join(
+                    Site, WageMaster.site_name == Site.site_name
+                ).filter(
+                    Employee.employee_id == record.get('employee_id'),
+                    Site.site_id == current_user.site_id
+                ).first()
+                if not employee:
                     return jsonify({
                         "success": False,
                         "message": f"Employee {record.get('employee_id')} not found or not in your site"
@@ -291,7 +318,14 @@ def get_site_employees(current_user):
     
     try:
         if current_user.role == 'supervisor':
-            employees = Employee.query.filter_by(site_id=current_user.site_id).all()
+            # For supervisors, filter by their assigned site through salary codes
+            from models.wage_master import WageMaster
+            from models.site import Site
+            employees = Employee.query.join(
+                WageMaster, Employee.salary_code == WageMaster.salary_code
+            ).join(
+                Site, WageMaster.site_name == Site.site_name
+            ).filter(Site.site_id == current_user.site_id).all()
         else:
             employees = Employee.query.all()
         
@@ -346,11 +380,24 @@ def get_site_attendance(current_user):
         query = Attendance.query.join(Employee)
         
         if current_user.role == 'supervisor':
-            query = query.filter(Employee.site_id == current_user.site_id)
+            # For supervisors, filter by their assigned site through salary codes
+            from models.wage_master import WageMaster
+            from models.site import Site
+            query = query.join(
+                WageMaster, Employee.salary_code == WageMaster.salary_code
+            ).join(
+                Site, WageMaster.site_name == Site.site_name
+            ).filter(Site.site_id == current_user.site_id)
         else:
-            # Admin: optionally filter by provided site_id
+            # Admin: optionally filter by provided site_id through salary codes
             if site_id:
-                query = query.filter(Employee.site_id == site_id)
+                from models.wage_master import WageMaster
+                from models.site import Site
+                query = query.join(
+                    WageMaster, Employee.salary_code == WageMaster.salary_code
+                ).join(
+                    Site, WageMaster.site_name == Site.site_name
+                ).filter(Site.site_id == site_id)
         
         if start_date:
             query = query.filter(Attendance.attendance_date >= start_date)
@@ -617,11 +664,22 @@ def bulk_upload_attendance(current_user):
                     results["failed"] += 1
                     continue
                 
-                # For supervisors, check if employee belongs to their site
-                if current_user.role == 'supervisor' and employee.site_id != current_user.site_id:
-                    results["errors"].append(f"Employee {employee_id} not in your site")
-                    results["failed"] += 1
-                    continue
+                # For supervisors, check if employee belongs to their site through salary codes
+                if current_user.role == 'supervisor':
+                    from models.wage_master import WageMaster
+                    from models.site import Site
+                    site_check = Employee.query.join(
+                        WageMaster, Employee.salary_code == WageMaster.salary_code
+                    ).join(
+                        Site, WageMaster.site_name == Site.site_name
+                    ).filter(
+                        Employee.employee_id == employee_id,
+                        Site.site_id == current_user.site_id
+                    ).first()
+                    if not site_check:
+                        results["errors"].append(f"Employee {employee_id} not in your site")
+                        results["failed"] += 1
+                        continue
                 
                 # Process attendance for each day column
                 for col in df.columns:
@@ -686,14 +744,28 @@ def download_attendance_template(current_user):
     logger.info(f"Template request - month: {month_param}, year: {year_param}, site: {site_param}, user_role: {current_user.role}")
     
     try:
-        # Resolve employees for the requested site
+        # Resolve employees for the requested site through salary code relationships
         if site_param:
-            employees = Employee.query.filter_by(site_id=site_param).all()
-            logger.info(f"Loading employees for site {site_param}: {len(employees)} found")
+            # Join Employee -> WageMaster -> Site to filter by site_id
+            from models.wage_master import WageMaster
+            from models.site import Site
+            employees = Employee.query.join(
+                WageMaster, Employee.salary_code == WageMaster.salary_code
+            ).join(
+                Site, WageMaster.site_name == Site.site_name
+            ).filter(Site.site_id == site_param).all()
+            logger.info(f"Loading employees for site {site_param} via salary codes: {len(employees)} found")
         else:
             if current_user.role == 'supervisor' and current_user.site_id:
-                employees = Employee.query.filter_by(site_id=current_user.site_id).all()
-                logger.info(f"Loading employees for supervisor site {current_user.site_id}: {len(employees)} found")
+                # For supervisors, filter by their assigned site through salary codes
+                from models.wage_master import WageMaster
+                from models.site import Site
+                employees = Employee.query.join(
+                    WageMaster, Employee.salary_code == WageMaster.salary_code
+                ).join(
+                    Site, WageMaster.site_name == Site.site_name
+                ).filter(Site.site_id == current_user.site_id).all()
+                logger.info(f"Loading employees for supervisor site {current_user.site_id} via salary codes: {len(employees)} found")
             else:
                 # For admin users without site filter, load all employees
                 employees = Employee.query.all()
