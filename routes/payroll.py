@@ -2,6 +2,9 @@ from flask import Blueprint, request, jsonify, make_response, send_file
 from models import db
 from models.employee import Employee
 from models.user import User
+from models.attendance import Attendance
+from models.wage_master import WageMaster
+from models.site import Site
 from services.salary_service import SalaryService
 from services.attendance_service import AttendanceService
 from routes.auth import token_required
@@ -10,8 +13,12 @@ import json
 import os
 import tempfile
 import uuid
+import logging
 from functools import wraps
+from sqlalchemy import func
 from services.pdf_service import generate_payroll_pdf
+
+logger = logging.getLogger(__name__)
 
 # Import PDF generation libraries
 try:
@@ -895,3 +902,235 @@ def get_sites_for_payroll(current_user):
         
     except Exception as e:
         return jsonify({'success': False, 'message': 'Error retrieving sites', 'error': str(e)}), 500
+
+@payroll_bp.route('/bonus', methods=['GET'])
+@token_required
+@require_admin_or_supervisor
+def calculate_bonus(current_user):
+    """Calculate bonus for employees using optimized bulk queries (8.33% of basic salary)"""
+    try:
+        # Get parameters
+        site_id = request.args.get('site_id')
+        year = request.args.get('year')
+        start_month = request.args.get('start_month')
+        end_month = request.args.get('end_month')
+
+        if not year or not start_month or not end_month:
+            return jsonify({
+                'success': False,
+                'message': 'Year, start_month, and end_month are required'
+            }), 400
+
+        # Parse parameters
+        year = int(year)
+        start_month = int(start_month)
+        end_month = int(end_month)
+
+        if start_month > end_month:
+            return jsonify({
+                'success': False,
+                'message': 'Start month cannot be greater than end month'
+            }), 400
+
+        # Calculate date range for the entire period
+        from datetime import date
+        start_date = date(year, start_month, 1)
+        # Get last day of end month
+        import calendar
+        end_date = date(year, end_month, calendar.monthrange(year, end_month)[1])
+
+        logger.info(f"Bonus calculation: {start_date} to {end_date}, site_id: {site_id}")
+
+        # OPTIMIZATION 1: Get all employees in one query with role-based filtering
+        employee_query = Employee.query.filter_by(employment_status='Active')
+
+        # Apply role-based filtering
+        if current_user.role == 'supervisor':
+            if current_user.site_id:
+                site = Site.query.filter_by(site_id=current_user.site_id).first()
+                if site:
+                    site_salary_codes = WageMaster.query.filter_by(site_name=site.site_name).with_entities(WageMaster.salary_code).all()
+                    site_salary_codes = [code[0] for code in site_salary_codes]
+
+                    if site_salary_codes:
+                        employee_query = employee_query.filter(Employee.salary_code.in_(site_salary_codes))
+                    else:
+                        employee_query = employee_query.filter(False)
+                else:
+                    employee_query = employee_query.filter(False)
+            else:
+                return jsonify({
+                    'success': True,
+                    'message': 'No site assigned to supervisor',
+                    'data': []
+                })
+        elif site_id:
+            site = Site.query.filter_by(site_id=site_id).first()
+            if site:
+                site_salary_codes = WageMaster.query.filter_by(site_name=site.site_name).with_entities(WageMaster.salary_code).all()
+                site_salary_codes = [code[0] for code in site_salary_codes]
+
+                if site_salary_codes:
+                    employee_query = employee_query.filter(Employee.salary_code.in_(site_salary_codes))
+                else:
+                    employee_query = employee_query.filter(False)
+            else:
+                employee_query = employee_query.filter(False)
+
+        employees = employee_query.all()
+        employee_ids = [emp.employee_id for emp in employees]
+
+        if not employees:
+            return jsonify({
+                'success': True,
+                'message': 'No employees found for the selected criteria',
+                'data': {
+                    'bonus_records': [],
+                    'total_employees': 0,
+                    'total_bonus': 0,
+                    'period': {
+                        'year': year,
+                        'start_month': start_month,
+                        'end_month': end_month,
+                        'month_count': end_month - start_month + 1
+                    }
+                }
+            })
+
+        logger.info(f"Found {len(employees)} employees to process")
+
+        # OPTIMIZATION 2: Bulk fetch all wage master data (1 query)
+        wage_master_query = WageMaster.query.filter(WageMaster.salary_code.in_([emp.salary_code for emp in employees if emp.salary_code]))
+        wage_masters = wage_master_query.all()
+
+        # Create wage lookup dictionary
+        wage_lookup = {wm.salary_code: wm.base_wage for wm in wage_masters}
+        logger.info(f"Loaded wage data for {len(wage_lookup)} salary codes")
+
+        # OPTIMIZATION 3: Bulk fetch all attendance data with aggregation (1 query)
+        # This replaces individual queries for each employee-month combination
+        attendance_data = db.session.query(
+            Attendance.employee_id,
+            func.extract('year', Attendance.attendance_date).label('year'),
+            func.extract('month', Attendance.attendance_date).label('month'),
+            func.count(Attendance.attendance_id).label('present_days')
+        ).filter(
+            Attendance.employee_id.in_(employee_ids),
+            Attendance.attendance_date.between(start_date, end_date),
+            Attendance.attendance_status.in_(['Present', 'Late'])  # Only count Present and Late as present days
+        ).group_by(
+            Attendance.employee_id,
+            func.extract('year', Attendance.attendance_date),
+            func.extract('month', Attendance.attendance_date)
+        ).all()
+
+        logger.info(f"Bulk loaded {len(attendance_data)} attendance records")
+
+        # Create attendance lookup: {employee_id: {month: present_days}}
+        attendance_lookup = {}
+        for record in attendance_data:
+            emp_id = record.employee_id
+            month = int(record.month)
+            present_days = record.present_days
+
+            if emp_id not in attendance_lookup:
+                attendance_lookup[emp_id] = {}
+
+            attendance_lookup[emp_id][month] = present_days
+
+        # OPTIMIZATION 4: Calculate bonuses in memory
+        bonus_data = []
+        total_bonus = 0
+        processed_count = 0
+
+        for employee in employees:
+            try:
+                processed_count += 1
+
+                # Progress logging
+                if processed_count % 100 == 0:
+                    logger.info(f"Processed {processed_count}/{len(employees)} employees")
+
+                # Get wage for this employee
+                daily_wage = wage_lookup.get(employee.salary_code, 526.0)  # Default to unskilled wage
+
+                # Calculate average basic salary over the period
+                total_basic_salary = 0
+                months_with_data = 0
+
+                for month in range(start_month, end_month + 1):
+                    # Get present days for this month (default to 0 if no data)
+                    present_days = attendance_lookup.get(employee.employee_id, {}).get(month, 0)
+
+                    # Calculate basic salary for this month
+                    basic_salary = present_days * daily_wage
+                    total_basic_salary += basic_salary
+
+                    # Only count months where employee had some attendance data
+                    if present_days > 0:
+                        months_with_data += 1
+
+                # Calculate average basic salary
+                if months_with_data > 0:
+                    average_basic_salary = total_basic_salary / months_with_data
+                    # Calculate bonus as 8.33% of basic salary
+                    bonus_amount = round(average_basic_salary * 0.0833, 2)
+
+                    bonus_data.append({
+                        'employee_id': employee.employee_id,
+                        'employee_name': f"{employee.first_name or ''} {employee.last_name or ''}".strip() or f"Employee {employee.employee_id}",
+                        'basic_salary': round(average_basic_salary, 2),
+                        'bonus_amount': bonus_amount,
+                        'period_months': months_with_data
+                    })
+
+                    total_bonus += bonus_amount
+                else:
+                    # No attendance data available for any month
+                    bonus_data.append({
+                        'employee_id': employee.employee_id,
+                        'employee_name': f"{employee.first_name or ''} {employee.last_name or ''}".strip() or f"Employee {employee.employee_id}",
+                        'basic_salary': 0,
+                        'bonus_amount': 0,
+                        'period_months': 0
+                    })
+
+            except Exception as emp_error:
+                logger.error(f"Error processing employee {employee.employee_id}: {str(emp_error)}")
+                bonus_data.append({
+                    'employee_id': employee.employee_id,
+                    'employee_name': f"{employee.first_name or ''} {employee.last_name or ''}".strip() or f"Employee {employee.employee_id}",
+                    'basic_salary': 0,
+                    'bonus_amount': 0,
+                    'period_months': 0,
+                    'error': str(emp_error)
+                })
+
+        # Sort by employee ID
+        bonus_data.sort(key=lambda x: x['employee_id'])
+
+        logger.info(f"Bonus calculation completed. Processed {processed_count} employees, calculated bonuses for {len([b for b in bonus_data if b['bonus_amount'] > 0])} employees")
+
+        return jsonify({
+            'success': True,
+            'message': f'Bonus calculation completed for {len(employees)} employees in {end_month - start_month + 1} months',
+            'data': {
+                'bonus_records': bonus_data,
+                'total_employees': len(bonus_data),
+                'total_bonus': round(total_bonus, 2),
+                'period': {
+                    'year': year,
+                    'start_month': start_month,
+                    'end_month': end_month,
+                    'month_count': end_month - start_month + 1
+                }
+            }
+        })
+
+    except Exception as e:
+        logger.error(f"Error in bonus calculation: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': 'Error calculating bonus',
+            'error': str(e)
+        }), 500
