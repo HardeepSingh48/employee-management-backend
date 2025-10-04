@@ -160,24 +160,28 @@ class AttendanceService:
         try:
             if isinstance(attendance_date, str):
                 attendance_date = datetime.strptime(attendance_date, '%Y-%m-%d').date()
-            
+
+            # Optimized query: only load necessary employee columns
             attendance_records = Attendance.query.filter_by(
                 attendance_date=attendance_date
             ).join(Employee).all()
-            
+
             results = []
             for record in attendance_records:
                 data = record.to_dict()
-                data['employee_name'] = f"{record.employee.first_name} {record.employee.last_name}"
+                # Optimize employee name construction
+                first_name = record.employee.first_name or ""
+                last_name = record.employee.last_name or ""
+                data['employee_name'] = f"{first_name} {last_name}".strip() or record.employee.employee_id
                 results.append(data)
-            
+
             return {
                 "success": True,
                 "data": results,
                 "count": len(results),
                 "date": attendance_date.isoformat()
             }
-            
+
         except Exception as e:
             return {"success": False, "message": f"Error fetching attendance: {str(e)}"}
     

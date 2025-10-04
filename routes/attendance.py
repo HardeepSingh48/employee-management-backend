@@ -311,24 +311,54 @@ def bulk_mark_attendance(current_user):
 @token_required
 def get_site_employees(current_user):
     """
-    Get all employees for supervisor's site
+    Get employees for supervisor's site with pagination
+    Query parameters:
+    - page: Page number (default: 1)
+    - per_page: Items per page (default: 50, max: 200)
+    - search: Search term for employee name or ID
     """
     if current_user.role not in ['supervisor', 'admin']:
         return jsonify({"success": False, "message": "Unauthorized"}), 403
-    
+
     try:
+        # Pagination parameters
+        page = request.args.get('page', 1, type=int)
+        per_page = min(request.args.get('per_page', 50, type=int), 200)  # Max 200 per page
+        search = request.args.get('search', '').strip()
+
+        # Base query
+        query = Employee.query
+
+        # Apply role-based filtering
         if current_user.role == 'supervisor':
             # For supervisors, filter by their assigned site through salary codes
             from models.wage_master import WageMaster
             from models.site import Site
-            employees = Employee.query.join(
+            query = query.join(
                 WageMaster, Employee.salary_code == WageMaster.salary_code
             ).join(
                 Site, WageMaster.site_name == Site.site_name
-            ).filter(Site.site_id == current_user.site_id).all()
-        else:
-            employees = Employee.query.all()
-        
+            ).filter(Site.site_id == current_user.site_id)
+        # For admins, no additional filtering needed
+
+        # Apply search filter if provided
+        if search:
+            search_filter = f"%{search}%"
+            query = query.filter(
+                db.or_(
+                    Employee.employee_id.ilike(search_filter),
+                    Employee.first_name.ilike(search_filter),
+                    Employee.last_name.ilike(search_filter)
+                )
+            )
+
+        # Get total count for pagination
+        total_count = query.count()
+
+        # Apply pagination
+        employees = query.offset((page - 1) * per_page).limit(per_page).all()
+
+        # Format employee data
         employee_data = []
         for emp in employees:
             # Ensure full_name is never empty
@@ -347,13 +377,24 @@ def get_site_employees(current_user):
                 'department_name': emp.department.department_name if emp.department else None,
                 'designation': emp.designation
             })
-        
-        return jsonify({
+
+        response = jsonify({
             "success": True,
             "data": employee_data,
-            "count": len(employee_data)
-        }), 200
-        
+            "pagination": {
+                "page": page,
+                "per_page": per_page,
+                "total_count": total_count,
+                "total_pages": (total_count + per_page - 1) // per_page
+            }
+        })
+
+        # Add caching headers for better performance
+        response.headers['Cache-Control'] = 'private, max-age=300'  # Cache for 5 minutes
+        response.headers['X-Total-Count'] = str(total_count)
+
+        return response, 200
+
     except Exception as e:
         return jsonify({
             "success": False,
@@ -364,21 +405,32 @@ def get_site_employees(current_user):
 @token_required
 def get_site_attendance(current_user):
     """
-    Get attendance records for supervisor's site with filtering
+    Get attendance records for supervisor's site with filtering and pagination
+    Query parameters:
+    - start_date: Start date filter (YYYY-MM-DD)
+    - end_date: End date filter (YYYY-MM-DD)
+    - employee_id: Filter by specific employee
+    - site_id: Filter by site (admin only)
+    - page: Page number (default: 1)
+    - per_page: Items per page (default: 100, max: 500)
     """
     if current_user.role not in ['supervisor', 'admin']:
         return jsonify({"success": False, "message": "Unauthorized"}), 403
-    
+
     try:
         # Get query parameters
         start_date = request.args.get('start_date')
         end_date = request.args.get('end_date')
         employee_id = request.args.get('employee_id')
         site_id = request.args.get('site_id')
-        
-        # Build query
+
+        # Pagination parameters
+        page = request.args.get('page', 1, type=int)
+        per_page = min(request.args.get('per_page', 100, type=int), 500)  # Max 500 per page
+
+        # Build query with optimized joins
         query = Attendance.query.join(Employee)
-        
+
         if current_user.role == 'supervisor':
             # For supervisors, filter by their assigned site through salary codes
             from models.wage_master import WageMaster
@@ -398,44 +450,58 @@ def get_site_attendance(current_user):
                 ).join(
                     Site, WageMaster.site_name == Site.site_name
                 ).filter(Site.site_id == site_id)
-        
+
+        # Apply filters
         if start_date:
             query = query.filter(Attendance.attendance_date >= start_date)
-        
+
         if end_date:
             query = query.filter(Attendance.attendance_date <= end_date)
-        
+
         if employee_id:
             query = query.filter(Attendance.employee_id == employee_id)
-        
-        # Get results
-        attendance_records = query.order_by(Attendance.attendance_date.desc()).all()
-        
-        # Format results
+
+        # Get total count for pagination
+        total_count = query.count()
+
+        # Apply pagination and ordering
+        attendance_records = query.order_by(Attendance.attendance_date.desc()).offset((page - 1) * per_page).limit(per_page).all()
+
+        # Format results with optimized field selection
         results = []
         for record in attendance_records:
             results.append({
                 'attendance_id': record.attendance_id,
                 'employee_id': record.employee_id,
-                'employee_name': f"{record.employee.first_name} {record.employee.last_name}",
+                'employee_name': f"{record.employee.first_name or ''} {record.employee.last_name or ''}".strip() or record.employee_id,
                 'attendance_date': record.attendance_date.isoformat(),
                 'attendance_status': record.attendance_status,
-                'check_in_time': record.check_in_time.isoformat() if record.check_in_time else None,
-                'check_out_time': record.check_out_time.isoformat() if record.check_out_time else None,
                 'overtime_shifts': record.overtime_shifts,
-                'overtime_hours': record.overtime_hours,
-                'total_hours_worked': record.total_hours_worked,
                 'remarks': record.remarks,
                 'marked_by': record.marked_by,
-                'created_date': record.created_date.isoformat() if record.created_date else None
+                # Only include time fields if they exist to reduce payload
+                'check_in_time': record.check_in_time.isoformat() if record.check_in_time else None,
+                'check_out_time': record.check_out_time.isoformat() if record.check_out_time else None,
+                'total_hours_worked': record.total_hours_worked
             })
-        
-        return jsonify({
+
+        response = jsonify({
             "success": True,
             "data": results,
-            "count": len(results)
-        }), 200
-        
+            "pagination": {
+                "page": page,
+                "per_page": per_page,
+                "total_count": total_count,
+                "total_pages": (total_count + per_page - 1) // per_page
+            }
+        })
+
+        # Add caching headers (shorter cache for attendance data)
+        response.headers['Cache-Control'] = 'private, max-age=60'  # Cache for 1 minute
+        response.headers['X-Total-Count'] = str(total_count)
+
+        return response, 200
+
     except Exception as e:
         return jsonify({
             "success": False,
@@ -1057,34 +1123,31 @@ def bulk_mark_attendance_excel(current_user):
                 
                 employee_processed = False
 
-                # Optional: read Overtime column (hours or shifts)
-                overtime_shifts_value = 0.0
+                # Optional: read Overtime column (total monthly overtime shifts)
+                monthly_overtime_shifts = 0.0
                 if 'Overtime' in df.columns:
                     try:
                         raw_ot = row.get('Overtime')
                         if pd.notna(raw_ot) and str(raw_ot).strip() != '':
-                            ot_num = float(str(raw_ot).strip())
-                            # If value seems like hours (>2), convert to shifts (8 hours per shift) and round to nearest 0.5
-                            if ot_num > 2:
-                                shifts = ot_num / 8.0
-                            else:
-                                shifts = ot_num
-                            # round to nearest 0.5
-                            overtime_shifts_value = round(shifts * 2) / 2.0
+                            # The overtime column contains total overtime shifts for the entire month
+                            monthly_overtime_shifts = float(str(raw_ot).strip())
+                            # Round to nearest 0.5 as overtime shifts are typically in 0.5 increments
+                            monthly_overtime_shifts = round(monthly_overtime_shifts * 2) / 2.0
                     except Exception:
-                        overtime_shifts_value = 0.0
+                        monthly_overtime_shifts = 0.0
                 
                 # Process each date column for this employee
+                first_working_day_processed = False
                 for col in date_columns:
                     # Skip blank values
                     if pd.isna(row[col]) or str(row[col]).strip() == '':
                         continue
-                    
+
                     try:
                         attendance_value = normalize_attendance_value(row[col])
                         if not attendance_value:
                             continue
-                        
+
                         # Parse date from column
                         year_from_col, month_from_col, day_from_col = parse_date_from_column(col)
                         if year_from_col and month_from_col and day_from_col:
@@ -1092,17 +1155,27 @@ def bulk_mark_attendance_excel(current_user):
                                 attendance_date = date(year_from_col, month_from_col, day_from_col)
                             except ValueError:
                                 continue
-                            
+
+                            # Calculate overtime for this day
+                            day_overtime = 0.0
+                            if monthly_overtime_shifts > 0 and attendance_value not in ['Absent', 'Leave', 'Holiday']:
+                                if not first_working_day_processed:
+                                    # Apply total monthly overtime to first working day
+                                    day_overtime = monthly_overtime_shifts
+                                    first_working_day_processed = True
+                                else:
+                                    day_overtime = 0.0  # Overtime already applied to first working day
+
                             # Check if attendance exists (O(1) lookup instead of database query)
                             existing_key = f"{employee.employee_id}_{attendance_date}"
                             existing = existing_attendance_dict.get(existing_key)
-                            
+
                             if existing:
                                 # Mark for update
                                 existing.attendance_status = attendance_value
                                 # Update overtime if provided
-                                if overtime_shifts_value > 0:
-                                    existing.overtime_shifts = overtime_shifts_value
+                                if day_overtime > 0:
+                                    existing.overtime_shifts = day_overtime
                                 existing.marked_by = current_user.role
                                 existing.updated_by = current_user.email
                                 existing.updated_date = datetime.utcnow()
@@ -1115,7 +1188,7 @@ def bulk_mark_attendance_excel(current_user):
                                     'employee_id': employee.employee_id,
                                     'attendance_date': attendance_date,
                                     'attendance_status': attendance_value,
-                                    'overtime_shifts': overtime_shifts_value,
+                                    'overtime_shifts': day_overtime,
                                     'marked_by': current_user.role,
                                     'created_by': current_user.email,
                                     'created_date': datetime.utcnow(),
@@ -1126,9 +1199,9 @@ def bulk_mark_attendance_excel(current_user):
                                 }
                                 new_attendance_records.append(new_record)
                                 results["new_records"] += 1
-                            
+
                             employee_processed = True
-                            
+
                     except Exception as e:
                         logger.error(f"Error processing column {col} for employee {employee_id}: {str(e)}")
                         results["errors"].append(f"Error processing column {col} for employee {employee_id}: {str(e)}")

@@ -181,11 +181,13 @@ def generate_payslip_html(employee_data, year, month):
             deductions.append((name, amount))
     
     # Add dynamic deductions from the deductions module (with shorter names)
+    # Exclude overtime-related fields that are not deductions
+    overtime_fields_to_exclude = ['Overtime Shifts', 'Overtime Hours', 'Overtime Rate Hourly']
     for key, value in salary_data.items():
-        if key not in ['Employee ID', 'Employee Name', 'Skill Level', 'Present Days', 'Daily Wage', 
+        if key not in ['Employee ID', 'Employee Name', 'Skill Level', 'Present Days', 'Daily Wage',
                        'Basic', 'Special Basic', 'DA', 'HRA', 'Overtime', 'Overtime Allowance', 'Others', 'Total Earnings',
-                       'PF', 'ESIC', 'Society', 'Income Tax', 'Insurance', 'Others Recoveries', 
-                       'Total Deductions', 'Net Salary'] and float(value) > 0:
+                       'PF', 'ESIC', 'Society', 'Income Tax', 'Insurance', 'Others Recoveries',
+                       'Total Deductions', 'Net Salary'] + overtime_fields_to_exclude and float(value) > 0:
             # Truncate long names for better fit
             short_name = key[:10] + "..." if len(key) > 10 else key
             deductions.append((short_name, value))
