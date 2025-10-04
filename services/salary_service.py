@@ -80,36 +80,51 @@ class SalaryService:
         Reduces from N*3 queries to 3-4 total queries
         """
         try:
+            # Import models at function level to avoid scoping issues
+            from models.wage_master import WageMaster
+            from models.site import Site
+
             first_day = date(year, month, 1)
             last_day = date(year, month, calendar.monthrange(year, month)[1])
-            
+
             # ============================================
             # STEP 1: Get all employees with wage data in ONE JOIN query
             # ============================================
-            employees_query = db.session.query(
-                Employee.employee_id,
-                Employee.first_name,
-                Employee.last_name,
-                Employee.skill_category,
-                Employee.salary_code,
-                Employee.wage_rate,
-                WageMaster.base_wage.label('wage_master_base_wage')
-            ).outerjoin(
-                WageMaster,
-                Employee.salary_code == WageMaster.salary_code
-            )
-            
-            # Apply site filter if provided (site_id is actually site_name from URL)
+
             if site_id:
-                # site_id parameter is actually the site name from the URL
-                employees_query = employees_query.filter(
-                    WageMaster.site_name == site_id
+                # When filtering by site, we need to join through WageMaster and Site
+                employees_query = db.session.query(
+                    Employee.employee_id,
+                    Employee.first_name,
+                    Employee.last_name,
+                    Employee.skill_category,
+                    Employee.salary_code,
+                    Employee.wage_rate,
+                    WageMaster.base_wage.label('wage_master_base_wage')
+                ).join(
+                    WageMaster, Employee.salary_code == WageMaster.salary_code
+                ).join(
+                    Site, WageMaster.site_name == Site.site_name
+                ).filter(Site.site_id == site_id)
+            else:
+                # When getting all employees, use outer join to include employees without wage masters
+                employees_query = db.session.query(
+                    Employee.employee_id,
+                    Employee.first_name,
+                    Employee.last_name,
+                    Employee.skill_category,
+                    Employee.salary_code,
+                    Employee.wage_rate,
+                    WageMaster.base_wage.label('wage_master_base_wage')
+                ).outerjoin(
+                    WageMaster,
+                    Employee.salary_code == WageMaster.salary_code
                 )
-            
+
             employees_data = employees_query.all()
-            
+
             if not employees_data:
-                return {'success': False, 'message': 'No employees found'}
+                return {'success': False, 'message': f'No employees found{" for site " + site_id if site_id else ""}'}
             
             # Create employee lookup dictionary with wage calculation
             employee_dict = {}

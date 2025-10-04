@@ -103,6 +103,7 @@ class Employee(db.Model):
     # Relationships
     department = db.relationship("Department", backref="employees")
     wage_master = db.relationship("WageMaster", backref="employees", foreign_keys=[salary_code])
+    site = db.relationship("Site", backref="employees")
 
     def __repr__(self):
         return f"<Employee {self.employee_id} - {self.first_name} {self.last_name}>"
