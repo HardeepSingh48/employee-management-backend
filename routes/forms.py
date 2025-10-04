@@ -62,12 +62,11 @@ def get_form_b_data():
         employee_ids = [emp.employee_id for emp in employees]
 
         # ============================================
-        # STEP 2: BULK calculate salaries for ALL employees (3 queries)
+        # STEP 2: BULK calculate salaries for filtered employees (3 queries)
         # ============================================
         bulk_salary_start = time.time()
-        # Use decoded site name for salary calculation
-        site_for_salary = decoded_site if site else None
-        bulk_salary_result = SalaryService.generate_monthly_salary_data(year, month, site_for_salary)
+        # Pass the already filtered employee IDs to avoid double filtering
+        bulk_salary_result = SalaryService.generate_monthly_salary_data_for_employees(employee_ids, year, month)
         bulk_salary_time = time.time() - bulk_salary_start
 
         if not bulk_salary_result['success']:
