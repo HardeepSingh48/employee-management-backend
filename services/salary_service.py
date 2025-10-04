@@ -99,16 +99,12 @@ class SalaryService:
                 Employee.salary_code == WageMaster.salary_code
             )
             
-            # Apply site filter if provided
+            # Apply site filter if provided (site_id is actually site_name from URL)
             if site_id:
-                from models.site import Site
-                site = Site.query.filter_by(site_id=site_id).first()
-                if site:
-                    employees_query = employees_query.filter(
-                        WageMaster.site_name == site.site_name
-                    )
-                else:
-                    return {'success': False, 'message': 'Site not found'}
+                # site_id parameter is actually the site name from the URL
+                employees_query = employees_query.filter(
+                    WageMaster.site_name == site_id
+                )
             
             employees_data = employees_query.all()
             
@@ -942,4 +938,58 @@ class SalaryService:
                 'success': False,
                 'message': 'Error in bulk salary calculation for PDF',
                 'error': str(e)
+            }
+
+    @staticmethod
+    def get_bulk_monthly_deductions(employee_ids, year, month):
+        """
+        OPTIMIZED: Get monthly deductions for multiple employees in ONE query
+        Returns dict: {employee_id: {total_deduction, deduction_details}}
+        """
+        try:
+            # Single query to get ALL deductions for ALL employees
+            all_deductions = Deduction.query.filter(
+                Deduction.employee_id.in_(employee_ids)
+            ).all()
+
+            # Group deductions by employee
+            deductions_by_employee = {}
+            for deduction in all_deductions:
+                if deduction.is_active_for_month(year, month):
+                    emp_id = deduction.employee_id
+                    if emp_id not in deductions_by_employee:
+                        deductions_by_employee[emp_id] = []
+                    deductions_by_employee[emp_id].append(deduction)
+
+            # Calculate totals for each employee
+            deductions_dict = {}
+            for emp_id in employee_ids:
+                monthly_deduction_total = 0
+                deduction_details = {}
+
+                if emp_id in deductions_by_employee:
+                    for deduction in deductions_by_employee[emp_id]:
+                        installment = deduction.get_installment_for_month(year, month)
+                        monthly_deduction_total += installment
+
+                        deduction_type = deduction.deduction_type
+                        if deduction_type in deduction_details:
+                            deduction_details[deduction_type] += installment
+                        else:
+                            deduction_details[deduction_type] = installment
+
+                deductions_dict[emp_id] = {
+                    'total_deduction': float(monthly_deduction_total or 0),
+                    'deduction_details': deduction_details
+                }
+
+            return {
+                'success': True,
+                'data': deductions_dict
+            }
+
+        except Exception as e:
+            return {
+                'success': False,
+                'message': f'Error in bulk deductions calculation: {str(e)}'
             }

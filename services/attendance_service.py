@@ -266,7 +266,74 @@ class AttendanceService:
             
         except Exception as e:
             return {"success": False, "message": f"Error calculating monthly summary: {str(e)}"}
-    
+
+    @staticmethod
+    def get_bulk_monthly_attendance_summary(employee_ids, year, month):
+        """
+        OPTIMIZED: Get monthly attendance summary for multiple employees in ONE query
+        Returns dict: {employee_id: {present_days, total_overtime_hours, ...}}
+        """
+        try:
+            # Get first and last day of the month
+            first_day = date(year, month, 1)
+            last_day = date(year, month, calendar.monthrange(year, month)[1])
+
+            # Single optimized query for ALL employees using database aggregation
+            from sqlalchemy import func, case
+
+            summary_results = db.session.query(
+                Attendance.employee_id,
+                func.count(case((Attendance.attendance_status.in_(['Present', 'Late']), 1))).label('present_days'),
+                func.count(case((Attendance.attendance_status == 'Absent', 1))).label('absent_days'),
+                func.count(case((Attendance.attendance_status == 'Late', 1))).label('late_days'),
+                func.count(case((Attendance.attendance_status == 'Half Day', 1))).label('half_days'),
+                func.coalesce(func.sum(Attendance.overtime_shifts), 0).label('total_overtime_shifts'),
+                func.count(Attendance.attendance_id).label('total_records')
+            ).filter(
+                Attendance.employee_id.in_(employee_ids),
+                Attendance.attendance_date >= first_day,
+                Attendance.attendance_date <= last_day
+            ).group_by(
+                Attendance.employee_id
+            ).all()
+
+            # Convert to lookup dictionary
+            attendance_dict = {}
+            for record in summary_results:
+                attendance_dict[record.employee_id] = {
+                    'present_days': record.present_days or 0,
+                    'absent_days': record.absent_days or 0,
+                    'late_days': record.late_days or 0,
+                    'half_days': record.half_days or 0,
+                    'total_overtime_shifts': float(record.total_overtime_shifts or 0),
+                    'total_overtime_hours': float(record.total_overtime_shifts or 0) * 8,
+                    'total_records': record.total_records or 0
+                }
+
+            # Fill in missing employees with zeros
+            for emp_id in employee_ids:
+                if emp_id not in attendance_dict:
+                    attendance_dict[emp_id] = {
+                        'present_days': 0,
+                        'absent_days': 0,
+                        'late_days': 0,
+                        'half_days': 0,
+                        'total_overtime_shifts': 0.0,
+                        'total_overtime_hours': 0.0,
+                        'total_records': 0
+                    }
+
+            return {
+                'success': True,
+                'data': attendance_dict
+            }
+
+        except Exception as e:
+            return {
+                'success': False,
+                'message': f'Error in bulk attendance calculation: {str(e)}'
+            }
+
     @staticmethod
     def update_attendance(attendance_id, **kwargs):
         """
