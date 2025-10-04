@@ -565,3 +565,381 @@ class SalaryService:
                 'success': False,
                 'message': f'Error getting overtime summary: {str(e)}'
             }
+
+    @staticmethod
+    def calculate_bulk_preview_salaries(employee_ids, year, month):
+        """
+        OPTIMIZED: Calculate salaries for multiple employees in bulk for preview
+        Returns pre-calculated salary data to avoid N+1 queries
+        """
+        try:
+            first_day = date(year, month, 1)
+            last_day = date(year, month, calendar.monthrange(year, month)[1])
+
+            # STEP 1: Bulk fetch employee data with wage info (1 query)
+            employees_query = db.session.query(
+                Employee.employee_id,
+                Employee.first_name,
+                Employee.last_name,
+                Employee.skill_category,
+                Employee.salary_code,
+                Employee.wage_rate,
+                WageMaster.base_wage.label('wage_master_base_wage')
+            ).outerjoin(
+                WageMaster, Employee.salary_code == WageMaster.salary_code
+            ).filter(
+                Employee.employee_id.in_(employee_ids)
+            )
+
+            employees_data = employees_query.all()
+
+            # Create employee lookup
+            employee_dict = {}
+            for emp in employees_data:
+                # Calculate daily wage
+                if emp.wage_master_base_wage:
+                    daily_wage = emp.wage_master_base_wage
+                elif emp.wage_rate:
+                    daily_wage = emp.wage_rate
+                else:
+                    skill_level = emp.skill_category or 'Un-Skilled'
+                    daily_wage = SalaryService.wage_map.get(skill_level, 526.0)
+
+                overtime_rate_hourly = daily_wage / 8
+
+                employee_dict[emp.employee_id] = {
+                    'employee_id': emp.employee_id,
+                    'name': f"{emp.first_name or ''} {emp.last_name or ''}".strip() or f"Employee {emp.employee_id}",
+                    'skill_category': emp.skill_category or 'Un-Skilled',
+                    'daily_wage': daily_wage,
+                    'overtime_rate_hourly': overtime_rate_hourly
+                }
+
+            # STEP 2: Bulk fetch attendance data (1 query)
+            attendance_summary = db.session.query(
+                Attendance.employee_id,
+                func.count(case((Attendance.attendance_status.in_(['Present', 'Late']), 1))).label('present_days'),
+                func.count(case((Attendance.attendance_status == 'Absent', 1))).label('absent_days'),
+                func.count(case((Attendance.attendance_status == 'Late', 1))).label('late_days'),
+                func.count(case((Attendance.attendance_status == 'Half Day', 1))).label('half_days'),
+                func.coalesce(func.sum(Attendance.overtime_shifts), 0).label('total_overtime_shifts')
+            ).filter(
+                Attendance.employee_id.in_(employee_ids),
+                Attendance.attendance_date >= first_day,
+                Attendance.attendance_date <= last_day
+            ).group_by(
+                Attendance.employee_id
+            ).all()
+
+            # Create attendance lookup
+            attendance_dict = {
+                record.employee_id: {
+                    'present_days': record.present_days or 0,
+                    'absent_days': record.absent_days or 0,
+                    'late_days': record.late_days or 0,
+                    'half_days': record.half_days or 0,
+                    'total_overtime_shifts': float(record.total_overtime_shifts or 0)
+                }
+                for record in attendance_summary
+            }
+
+            # STEP 3: Bulk fetch deductions (1 query)
+            all_deductions = Deduction.query.filter(
+                Deduction.employee_id.in_(employee_ids)
+            ).all()
+
+            # Group deductions by employee
+            deductions_by_employee = {}
+            for deduction in all_deductions:
+                if deduction.is_active_for_month(year, month):
+                    emp_id = deduction.employee_id
+                    if emp_id not in deductions_by_employee:
+                        deductions_by_employee[emp_id] = []
+                    deductions_by_employee[emp_id].append(deduction)
+
+            # STEP 4: Calculate salaries in memory
+            salary_data_dict = {}
+
+            for emp_id, emp_info in employee_dict.items():
+                # Get attendance data
+                attendance = attendance_dict.get(emp_id, {
+                    'present_days': 0, 'absent_days': 0, 'late_days': 0,
+                    'half_days': 0, 'total_overtime_shifts': 0
+                })
+
+                # Calculate components
+                present_days = attendance['present_days']
+                daily_wage = emp_info['daily_wage']
+                basic = present_days * daily_wage
+
+                # Statutory deductions
+                pf = round(0.12 * min(basic, 15000), 2)
+                esic = round(0.0075 * min(basic, 21000), 2)
+
+                # Overtime
+                overtime_shifts = attendance['total_overtime_shifts']
+                overtime_hours = overtime_shifts * 8
+                overtime_allowance = round(overtime_hours * emp_info['overtime_rate_hourly'], 2)
+
+                # Monthly deductions
+                monthly_deduction_total = 0
+                deduction_details = {}
+
+                if emp_id in deductions_by_employee:
+                    for deduction in deductions_by_employee[emp_id]:
+                        installment = deduction.get_installment_for_month(year, month)
+                        monthly_deduction_total += installment
+
+                        deduction_type = deduction.deduction_type
+                        if deduction_type in deduction_details:
+                            deduction_details[deduction_type] += installment
+                        else:
+                            deduction_details[deduction_type] = installment
+
+                # Initialize all components (matching individual calculation)
+                special_basic = 0
+                da = 0
+                hra = 0
+                overtime_manual = 0
+                others_earnings = 0
+                society = 0
+                income_tax = 0
+                insurance = 0
+                others_recoveries = 0
+
+                # Calculate totals (matching individual calculation)
+                total_earnings = basic + special_basic + da + hra + overtime_manual + overtime_allowance + others_earnings
+                total_deductions = pf + esic + society + income_tax + insurance + others_recoveries + monthly_deduction_total
+                net_salary = total_earnings - total_deductions
+
+                # Build salary data structure (matching individual calculation format)
+                salary_data_dict[emp_id] = {
+                    'Employee ID': emp_id,
+                    'Employee Name': emp_info['name'],
+                    'Skill Level': emp_info['skill_category'],
+                    'Present Days': present_days,
+                    'Daily Wage': round(daily_wage, 2),
+                    'Basic': round(basic, 2),
+                    'Special Basic': round(special_basic, 2),
+                    'DA': round(da, 2),
+                    'HRA': round(hra, 2),
+                    'Overtime': round(overtime_manual, 2),
+                    'Overtime Allowance': round(overtime_allowance, 2),
+                    'Overtime Shifts': overtime_shifts,
+                    'Overtime Hours': overtime_hours,
+                    'Overtime Rate Hourly': round(emp_info['overtime_rate_hourly'], 2),
+                    'Others': round(others_earnings, 2),
+                    'Total Earnings': round(total_earnings, 2),
+                    'PF': round(pf, 2),
+                    'ESIC': round(esic, 2),
+                    'Society': round(society, 2),
+                    'Income Tax': round(income_tax, 2),
+                    'Insurance': round(insurance, 2),
+                    'Others Recoveries': round(others_recoveries, 2),
+                    'Total Deductions': round(total_deductions, 2),
+                    'Net Salary': round(net_salary, 2),
+                    **{k: round(v, 2) for k, v in deduction_details.items()}  # Dynamic deductions
+                }
+
+            return {
+                'success': True,
+                'data': salary_data_dict
+            }
+
+        except Exception as e:
+            import traceback
+            print(traceback.format_exc())
+            return {
+                'success': False,
+                'message': 'Error in bulk salary calculation',
+                'error': str(e)
+            }
+
+    @staticmethod
+    def calculate_bulk_salaries(employee_ids, year, month):
+        """
+        OPTIMIZED: Calculate salaries for multiple employees in bulk for PDF generation
+        Same as calculate_bulk_preview_salaries but includes all salary components
+        """
+        try:
+            first_day = date(year, month, 1)
+            last_day = date(year, month, calendar.monthrange(year, month)[1])
+
+            # STEP 1: Bulk fetch employee data with wage info (1 query)
+            employees_query = db.session.query(
+                Employee.employee_id,
+                Employee.first_name,
+                Employee.last_name,
+                Employee.skill_category,
+                Employee.salary_code,
+                Employee.wage_rate,
+                WageMaster.base_wage.label('wage_master_base_wage')
+            ).outerjoin(
+                WageMaster, Employee.salary_code == WageMaster.salary_code
+            ).filter(
+                Employee.employee_id.in_(employee_ids)
+            )
+
+            employees_data = employees_query.all()
+
+            # Create employee lookup
+            employee_dict = {}
+            for emp in employees_data:
+                # Calculate daily wage
+                if emp.wage_master_base_wage:
+                    daily_wage = emp.wage_master_base_wage
+                elif emp.wage_rate:
+                    daily_wage = emp.wage_rate
+                else:
+                    skill_level = emp.skill_category or 'Un-Skilled'
+                    daily_wage = SalaryService.wage_map.get(skill_level, 526.0)
+
+                overtime_rate_hourly = daily_wage / 8
+
+                employee_dict[emp.employee_id] = {
+                    'employee_id': emp.employee_id,
+                    'name': f"{emp.first_name or ''} {emp.last_name or ''}".strip() or f"Employee {emp.employee_id}",
+                    'skill_category': emp.skill_category or 'Un-Skilled',
+                    'daily_wage': daily_wage,
+                    'overtime_rate_hourly': overtime_rate_hourly
+                }
+
+            # STEP 2: Bulk fetch attendance data (1 query)
+            attendance_summary = db.session.query(
+                Attendance.employee_id,
+                func.count(case((Attendance.attendance_status.in_(['Present', 'Late']), 1))).label('present_days'),
+                func.count(case((Attendance.attendance_status == 'Absent', 1))).label('absent_days'),
+                func.count(case((Attendance.attendance_status == 'Late', 1))).label('late_days'),
+                func.count(case((Attendance.attendance_status == 'Half Day', 1))).label('half_days'),
+                func.coalesce(func.sum(Attendance.overtime_shifts), 0).label('total_overtime_shifts')
+            ).filter(
+                Attendance.employee_id.in_(employee_ids),
+                Attendance.attendance_date >= first_day,
+                Attendance.attendance_date <= last_day
+            ).group_by(
+                Attendance.employee_id
+            ).all()
+
+            # Create attendance lookup
+            attendance_dict = {
+                record.employee_id: {
+                    'present_days': record.present_days or 0,
+                    'absent_days': record.absent_days or 0,
+                    'late_days': record.late_days or 0,
+                    'half_days': record.half_days or 0,
+                    'total_overtime_shifts': float(record.total_overtime_shifts or 0)
+                }
+                for record in attendance_summary
+            }
+
+            # STEP 3: Bulk fetch deductions (1 query)
+            all_deductions = Deduction.query.filter(
+                Deduction.employee_id.in_(employee_ids)
+            ).all()
+
+            # Group deductions by employee
+            deductions_by_employee = {}
+            for deduction in all_deductions:
+                if deduction.is_active_for_month(year, month):
+                    emp_id = deduction.employee_id
+                    if emp_id not in deductions_by_employee:
+                        deductions_by_employee[emp_id] = []
+                    deductions_by_employee[emp_id].append(deduction)
+
+            # STEP 4: Calculate salaries in memory (same as monthly calculation)
+            salary_data_dict = {}
+
+            for emp_id, emp_info in employee_dict.items():
+                # Get attendance data
+                attendance = attendance_dict.get(emp_id, {
+                    'present_days': 0, 'absent_days': 0, 'late_days': 0,
+                    'half_days': 0, 'total_overtime_shifts': 0
+                })
+
+                # Calculate basic salary components (same as generate_monthly_salary_data)
+                present_days = attendance['present_days']
+                daily_wage = emp_info['daily_wage']
+                basic = present_days * daily_wage
+
+                # Statutory deductions
+                pf = round(0.12 * min(basic, 15000), 2)
+                esic = round(0.0075 * min(basic, 21000), 2)
+
+                # Overtime
+                overtime_shifts = attendance['total_overtime_shifts']
+                overtime_hours = overtime_shifts * 8
+                overtime_allowance = round(overtime_hours * emp_info['overtime_rate_hourly'], 2)
+
+                # Initialize other components (set to 0 for bulk generation)
+                special_basic = 0
+                da = 0
+                hra = 0
+                overtime_manual = 0
+                others_earnings = 0
+                society = 0
+                income_tax = 0
+                insurance = 0
+                others_recoveries = 0
+
+                # Monthly deductions
+                monthly_deduction_total = 0
+                deduction_details = {}
+
+                if emp_id in deductions_by_employee:
+                    for deduction in deductions_by_employee[emp_id]:
+                        installment = deduction.get_installment_for_month(year, month)
+                        monthly_deduction_total += installment
+
+                        deduction_type = deduction.deduction_type
+                        if deduction_type in deduction_details:
+                            deduction_details[deduction_type] += installment
+                        else:
+                            deduction_details[deduction_type] = installment
+
+                # Calculate totals
+                total_earnings = basic + special_basic + da + hra + overtime_manual + overtime_allowance + others_earnings
+                total_deductions = pf + esic + society + income_tax + insurance + others_recoveries + monthly_deduction_total
+                net_salary = total_earnings - total_deductions
+
+                # Build result dictionary (same format as monthly calculation)
+                salary_data_dict[emp_id] = {
+                    'Employee ID': emp_id,
+                    'Employee Name': emp_info['name'],
+                    'Skill Level': emp_info['skill_category'],
+                    'Present Days': present_days,
+                    'Daily Wage': round(daily_wage, 2),
+                    'Basic': round(basic, 2),
+                    'Special Basic': round(special_basic, 2),
+                    'DA': round(da, 2),
+                    'HRA': round(hra, 2),
+                    'Overtime': round(overtime_manual, 2),
+                    'Overtime Allowance': round(overtime_allowance, 2),
+                    'Others': round(others_earnings, 2),
+                    'Total Earnings': round(total_earnings, 2),
+                    'PF': round(pf, 2),
+                    'ESIC': round(esic, 2),
+                    'Society': round(society, 2),
+                    'Income Tax': round(income_tax, 2),
+                    'Insurance': round(insurance, 2),
+                    'Others Recoveries': round(others_recoveries, 2),
+                    'Total Deductions': round(total_deductions, 2),
+                    'Net Salary': round(net_salary, 2)
+                }
+
+                # Add dynamic deduction details
+                for deduction_type, amount in deduction_details.items():
+                    salary_data_dict[emp_id][deduction_type] = round(amount, 2)
+
+            return {
+                'success': True,
+                'data': salary_data_dict
+            }
+
+        except Exception as e:
+            import traceback
+            print(traceback.format_exc())
+            return {
+                'success': False,
+                'message': 'Error in bulk salary calculation for PDF',
+                'error': str(e)
+            }
