@@ -21,9 +21,9 @@ def get_site_employees(current_user):
     
     try:
         if current_user.role == 'supervisor':
-            employees = Employee.query.filter_by(site_id=current_user.site_id).all()
+            employees = Employee.query.filter_by(site_id=current_user.site_id).order_by(Employee.employee_id.asc()).all()
         else:
-            employees = Employee.query.all()
+            employees = Employee.query.order_by(Employee.employee_id.asc()).all()
         
         employee_data = []
         for emp in employees:

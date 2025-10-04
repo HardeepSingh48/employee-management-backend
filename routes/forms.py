@@ -51,7 +51,8 @@ def get_form_b_data():
             query = query.join(WageMaster, Employee.salary_code == WageMaster.salary_code)\
                          .filter(WageMaster.site_name == decoded_site)
 
-        employees = query.all()
+        # Apply sorting and execute query (for both site-filtered and all employees)
+        employees = query.order_by(Employee.employee_id.asc()).all()
 
         if not employees:
             return jsonify({

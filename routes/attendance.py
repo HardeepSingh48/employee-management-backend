@@ -824,7 +824,7 @@ def download_attendance_template(current_user):
                 WageMaster, Employee.salary_code == WageMaster.salary_code
             ).join(
                 Site, WageMaster.site_name == Site.site_name
-            ).filter(Site.site_id == site_param).all()
+            ).filter(Site.site_id == site_param).order_by(Employee.employee_id.asc()).all()
             logger.info(f"Loading employees for site {site_param} via salary codes: {len(employees)} found")
         else:
             if current_user.role == 'supervisor' and current_user.site_id:
@@ -835,11 +835,11 @@ def download_attendance_template(current_user):
                     WageMaster, Employee.salary_code == WageMaster.salary_code
                 ).join(
                     Site, WageMaster.site_name == Site.site_name
-                ).filter(Site.site_id == current_user.site_id).all()
+                ).filter(Site.site_id == current_user.site_id).order_by(Employee.employee_id.asc()).all()
                 logger.info(f"Loading employees for supervisor site {current_user.site_id} via salary codes: {len(employees)} found")
             else:
                 # For admin users without site filter, load all employees
-                employees = Employee.query.all()
+                employees = Employee.query.order_by(Employee.employee_id.asc()).all()
                 logger.info(f"Loading all employees for admin: {len(employees)} found")
 
         # Get current month and year

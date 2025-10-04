@@ -352,7 +352,7 @@ def get_all_employees(page: int = 1, per_page: int = 10):
 
 def get_all_employees_unpaginated():
     """Get all employees without pagination"""
-    return Employee.query.all()
+    return Employee.query.order_by(Employee.employee_id.asc()).all()
 
 def search_employees(search_term: str = "", department: str = None, employment_status: str = None):
     """Search employees by various criteria"""
@@ -375,7 +375,7 @@ def search_employees(search_term: str = "", department: str = None, employment_s
     if employment_status:
         query = query.filter(Employee.employment_status == employment_status)
 
-    return query.all()
+    return query.order_by(Employee.employee_id.asc()).all()
 
 # Helper function to get the next employee ID (for reference or debugging)
 def get_next_employee_id() -> int:

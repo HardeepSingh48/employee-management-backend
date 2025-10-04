@@ -862,7 +862,7 @@ def get_site_employees(current_user):
         if not current_user.site_id:
             return jsonify({"success": False, "message": "Supervisor not assigned to any site"}), 400
         
-        employees = Employee.query.filter_by(site_id=current_user.site_id).all()
+        employees = Employee.query.filter_by(site_id=current_user.site_id).order_by(Employee.employee_id.asc()).all()
         
         employee_list = []
         for emp in employees:

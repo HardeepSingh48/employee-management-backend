@@ -317,7 +317,7 @@ class SalaryService:
                     WageMaster, Employee.salary_code == WageMaster.salary_code
                 ).join(
                     Site, WageMaster.site_name == Site.site_name
-                ).filter(Site.site_id == site_id)
+                ).filter(Site.site_id == site_id).order_by(Employee.employee_id.asc())
             else:
                 # When getting all employees, use outer join to include employees without wage masters
                 employees_query = db.session.query(
@@ -331,7 +331,7 @@ class SalaryService:
                 ).outerjoin(
                     WageMaster,
                     Employee.salary_code == WageMaster.salary_code
-                )
+                ).order_by(Employee.employee_id.asc())
 
             employees_data = employees_query.all()
 
@@ -812,7 +812,7 @@ class SalaryService:
                 WageMaster, Employee.salary_code == WageMaster.salary_code
             ).filter(
                 Employee.employee_id.in_(employee_ids)
-            )
+            ).order_by(Employee.employee_id.asc())
 
             employees_data = employees_query.all()
 

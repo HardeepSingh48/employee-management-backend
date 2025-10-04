@@ -861,7 +861,7 @@ def generate_payroll(current_user):
                 employees_in_range = Employee.query.filter(
                     Employee.employee_id >= from_id,
                     Employee.employee_id <= to_id
-                ).all()
+                ).order_by(Employee.employee_id.asc()).all()
                 employee_ids = [emp.employee_id for emp in employees_in_range]
 
         if not employee_ids:
@@ -1000,7 +1000,7 @@ def get_employees_for_payroll(current_user):
             WageMaster, Employee.salary_code == WageMaster.salary_code
         ).filter(
             Employee.employment_status == 'Active'
-        )
+        ).order_by(Employee.employee_id.asc())
 
         # OPTIMIZATION 2: Apply role-based filtering efficiently
         if current_user.role == 'supervisor':
@@ -1206,7 +1206,7 @@ def calculate_bonus(current_user):
         logger.info(f"Bonus calculation: {start_date} to {end_date}, site_id: {site_id}")
 
         # OPTIMIZATION 1: Get all employees in one query with role-based filtering
-        employee_query = Employee.query.filter_by(employment_status='Active')
+        employee_query = Employee.query.filter_by(employment_status='Active').order_by(Employee.employee_id.asc())
 
         # Apply role-based filtering
         if current_user.role == 'supervisor':
