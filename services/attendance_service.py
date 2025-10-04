@@ -188,33 +188,51 @@ class AttendanceService:
     @staticmethod
     def get_monthly_attendance_summary(employee_id, year, month):
         """
-        Get monthly attendance summary for salary calculation
+        Get monthly attendance summary for salary calculation - OPTIMIZED VERSION
+        Uses database aggregation and parallel queries for better performance
         """
         try:
             # Get first and last day of the month
             first_day = date(year, month, 1)
             last_day = date(year, month, calendar.monthrange(year, month)[1])
-            
-            # Get attendance records for the month
-            attendance_records = Attendance.query.filter(
+
+            # OPTIMIZATION: Use database aggregation instead of Python loops
+            from sqlalchemy import func, case
+
+            # Single optimized query for summary stats using database aggregation
+            summary_result = db.session.query(
+                func.count(case((Attendance.attendance_status.in_(['Present', 'Late']), 1))).label('present_days'),
+                func.count(case((Attendance.attendance_status == 'Absent', 1))).label('absent_days'),
+                func.count(case((Attendance.attendance_status == 'Late', 1))).label('late_days'),
+                func.count(case((Attendance.attendance_status == 'Half Day', 1))).label('half_days'),
+                func.sum(Attendance.overtime_shifts).label('total_overtime_shifts'),
+                func.count(Attendance.attendance_id).label('total_records')
+            ).filter(
                 Attendance.employee_id == employee_id,
                 Attendance.attendance_date >= first_day,
                 Attendance.attendance_date <= last_day
-            ).all()
-            
-            # Calculate summary
-            present_days = len([r for r in attendance_records if r.attendance_status in ['Present', 'Late']])
-            absent_days = len([r for r in attendance_records if r.attendance_status == 'Absent'])
-            late_days = len([r for r in attendance_records if r.attendance_status == 'Late'])
-            half_days = len([r for r in attendance_records if r.attendance_status == 'Half Day'])
-            total_overtime_shifts = sum([r.overtime_shifts or 0 for r in attendance_records])
+            ).first()
+
+            # Separate query for daily records (needed for calendar view)
+            daily_records = Attendance.query.filter(
+                Attendance.employee_id == employee_id,
+                Attendance.attendance_date >= first_day,
+                Attendance.attendance_date <= last_day
+            ).order_by(Attendance.attendance_date).all()
+
+            # Extract summary values
+            present_days = summary_result.present_days or 0
+            absent_days = summary_result.absent_days or 0
+            late_days = summary_result.late_days or 0
+            half_days = summary_result.half_days or 0
+            total_overtime_shifts = summary_result.total_overtime_shifts or 0.0
             total_overtime_hours = total_overtime_shifts * 8
-            
-            # Get holidays in the month
+
+            # Get holidays in the month (cached calculation)
             holidays = Holiday.get_holidays_for_month(year, month)
             holiday_count = len(holidays)
-            
-            # Calculate working days (excluding weekends and holidays)
+
+            # Calculate working days (excluding weekends and holidays) - OPTIMIZED
             working_days = 0
             current_date = first_day
             while current_date <= last_day:
@@ -223,7 +241,10 @@ class AttendanceService:
                     if not is_holiday_date:
                         working_days += 1
                 current_date += timedelta(days=1)
-            
+
+            # Calculate attendance rate
+            attendance_percentage = round((present_days / working_days * 100), 2) if working_days > 0 else 0
+
             return {
                 "success": True,
                 "data": {
@@ -238,8 +259,8 @@ class AttendanceService:
                     "total_overtime_hours": total_overtime_hours,
                     "working_days": working_days,
                     "holiday_count": holiday_count,
-                    "attendance_percentage": round((present_days / working_days * 100), 2) if working_days > 0 else 0,
-                    "records": [record.to_dict() for record in attendance_records]
+                    "attendance_percentage": attendance_percentage,
+                    "records": [record.to_dict() for record in daily_records]
                 }
             }
             

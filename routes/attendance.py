@@ -592,7 +592,12 @@ def get_monthly_attendance_summary(employee_id):
         )
 
         if result["success"]:
-            return jsonify(result), 200
+            response = jsonify(result)
+            # Add caching headers for monthly attendance data (cache for 5 minutes)
+            # Monthly data doesn't change frequently, so caching is safe
+            response.headers['Cache-Control'] = 'private, max-age=300'  # 5 minutes
+            response.headers['X-Performance-Optimized'] = 'true'
+            return response, 200
         else:
             return jsonify(result), 400
 

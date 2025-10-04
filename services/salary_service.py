@@ -5,13 +5,13 @@ from models.wage_master import WageMaster
 from models.holiday import Holiday
 from models.deduction import Deduction
 from datetime import datetime, date
-from sqlalchemy import and_, func
+from sqlalchemy import and_, func, case
 import pandas as pd
 import calendar
 
 class SalaryService:
 
-    # Wage rates by skill level (fallback mapping - your exact logic)
+    # Wage rates by skill level (fallback mapping)
     wage_map = {
         'Highly Skilled': 868.00,
         'Skilled': 739.00,
@@ -29,23 +29,20 @@ class SalaryService:
             employee = Employee.query.filter_by(employee_id=employee_id).first()
 
             if not employee:
-                return 526.0  # Default to Un-Skilled rate
+                return 526.0
 
-            # Priority 1: Use wage from salary code (WageMaster)
             if employee.wage_master and employee.wage_master.base_wage:
                 return employee.wage_master.base_wage
 
-            # Priority 2: Use direct wage_rate field
             if employee.wage_rate:
                 return employee.wage_rate
 
-            # Priority 3: Fallback to skill level mapping
             skill_level = employee.skill_category or 'Un-Skilled'
             return SalaryService.wage_map.get(skill_level, 526.0)
 
         except Exception as e:
             print(f"Error getting wage for employee {employee_id}: {str(e)}")
-            return 526.0  # Default to Un-Skilled rate
+            return 526.0
 
     @staticmethod
     def get_monthly_deductions(employee_id, year, month):
@@ -54,26 +51,22 @@ class SalaryService:
         Returns (total_deduction, deduction_details_dict)
         """
         try:
-            # Get all active deductions for the employee
             deductions = Deduction.query.filter_by(employee_id=employee_id).all()
             
             total_deduction = 0
             deduction_details = {}
             
             for deduction in deductions:
-                # Check if deduction is active for the given month
                 if deduction.is_active_for_month(year, month):
                     installment = deduction.get_installment_for_month(year, month)
                     total_deduction += installment
                     
-                    # Add to deduction details
                     deduction_type = deduction.deduction_type
                     if deduction_type in deduction_details:
                         deduction_details[deduction_type] += installment
                     else:
                         deduction_details[deduction_type] = installment
             
-            # Ensure we return numeric values
             return float(total_deduction or 0), deduction_details
             
         except Exception as e:
@@ -81,24 +74,237 @@ class SalaryService:
             return 0.0, {}
 
     @staticmethod
-    def calculate_salary_from_attendance_data(df, adjustments_df=None):
+    def generate_monthly_salary_data(year, month, site_id=None):
         """
-        Calculate salary using your exact logic from the provided code
-        Updated to use employee salary codes for wage rates and overtime shifts
+        OPTIMIZED: Generate salary calculation data using bulk queries
+        Reduces from N*3 queries to 3-4 total queries
         """
         try:
-            # If adjustments dataframe is provided but empty, create empty DataFrame
+            first_day = date(year, month, 1)
+            last_day = date(year, month, calendar.monthrange(year, month)[1])
+            
+            # ============================================
+            # STEP 1: Get all employees with wage data in ONE JOIN query
+            # ============================================
+            employees_query = db.session.query(
+                Employee.employee_id,
+                Employee.first_name,
+                Employee.last_name,
+                Employee.skill_category,
+                Employee.salary_code,
+                Employee.wage_rate,
+                WageMaster.base_wage.label('wage_master_base_wage')
+            ).outerjoin(
+                WageMaster,
+                Employee.salary_code == WageMaster.salary_code
+            )
+            
+            # Apply site filter if provided
+            if site_id:
+                from models.site import Site
+                site = Site.query.filter_by(site_id=site_id).first()
+                if site:
+                    employees_query = employees_query.filter(
+                        WageMaster.site_name == site.site_name
+                    )
+                else:
+                    return {'success': False, 'message': 'Site not found'}
+            
+            employees_data = employees_query.all()
+            
+            if not employees_data:
+                return {'success': False, 'message': 'No employees found'}
+            
+            # Create employee lookup dictionary with wage calculation
+            employee_dict = {}
+            for emp in employees_data:
+                # Calculate daily wage using the same priority logic
+                if emp.wage_master_base_wage:
+                    daily_wage = emp.wage_master_base_wage
+                elif emp.wage_rate:
+                    daily_wage = emp.wage_rate
+                else:
+                    skill_level = emp.skill_category or 'Un-Skilled'
+                    daily_wage = SalaryService.wage_map.get(skill_level, 526.0)
+                
+                # Calculate overtime rate (not stored in Employee model, calculated from daily wage)
+                overtime_rate_hourly = daily_wage / 8
+                
+                employee_dict[emp.employee_id] = {
+                    'employee_id': emp.employee_id,
+                    'name': f"{emp.first_name} {emp.last_name}",
+                    'skill_category': emp.skill_category or 'Un-Skilled',
+                    'daily_wage': daily_wage,
+                    'overtime_rate_hourly': overtime_rate_hourly
+                }
+            
+            employee_ids = list(employee_dict.keys())
+            
+            # ============================================
+            # STEP 2: Bulk fetch ALL attendance data in ONE aggregated query
+            # ============================================
+            attendance_summary = db.session.query(
+                Attendance.employee_id,
+                func.count(case((Attendance.attendance_status.in_(['Present', 'Late']), 1))).label('present_days'),
+                func.count(case((Attendance.attendance_status == 'Absent', 1))).label('absent_days'),
+                func.count(case((Attendance.attendance_status == 'Late', 1))).label('late_days'),
+                func.count(case((Attendance.attendance_status == 'Half Day', 1))).label('half_days'),
+                func.coalesce(func.sum(Attendance.overtime_shifts), 0).label('total_overtime_shifts')
+            ).filter(
+                Attendance.employee_id.in_(employee_ids),
+                Attendance.attendance_date >= first_day,
+                Attendance.attendance_date <= last_day
+            ).group_by(
+                Attendance.employee_id
+            ).all()
+            
+            # Create attendance lookup dictionary
+            attendance_dict = {
+                record.employee_id: {
+                    'present_days': record.present_days or 0,
+                    'absent_days': record.absent_days or 0,
+                    'late_days': record.late_days or 0,
+                    'half_days': record.half_days or 0,
+                    'total_overtime_shifts': float(record.total_overtime_shifts or 0)
+                }
+                for record in attendance_summary
+            }
+            
+            # ============================================
+            # STEP 3: Bulk fetch ALL deductions in ONE query
+            # ============================================
+            all_deductions = Deduction.query.filter(
+                Deduction.employee_id.in_(employee_ids)
+            ).all()
+            
+            # Group deductions by employee
+            deductions_by_employee = {}
+            for deduction in all_deductions:
+                if deduction.is_active_for_month(year, month):
+                    emp_id = deduction.employee_id
+                    if emp_id not in deductions_by_employee:
+                        deductions_by_employee[emp_id] = []
+                    deductions_by_employee[emp_id].append(deduction)
+            
+            # ============================================
+            # STEP 4: Calculate salary for all employees (in-memory)
+            # ============================================
+            salary_data = []
+            
+            for emp_id, emp_info in employee_dict.items():
+                # Get attendance data (default to zeros if no records)
+                attendance = attendance_dict.get(emp_id, {
+                    'present_days': 0,
+                    'absent_days': 0,
+                    'late_days': 0,
+                    'half_days': 0,
+                    'total_overtime_shifts': 0
+                })
+                
+                # Calculate basic salary components
+                present_days = attendance['present_days']
+                daily_wage = emp_info['daily_wage']
+                basic = present_days * daily_wage
+                
+                # Calculate statutory deductions
+                pf = round(0.12 * min(basic, 15000), 2)
+                esic = round(0.0075 * min(basic, 21000), 2)
+                
+                # Calculate overtime
+                overtime_shifts = attendance['total_overtime_shifts']
+                overtime_hours = overtime_shifts * 8
+                overtime_allowance = round(overtime_hours * emp_info['overtime_rate_hourly'], 2)
+                
+                # Get monthly deductions
+                monthly_deduction_total = 0
+                deduction_details = {}
+                
+                if emp_id in deductions_by_employee:
+                    for deduction in deductions_by_employee[emp_id]:
+                        installment = deduction.get_installment_for_month(year, month)
+                        monthly_deduction_total += installment
+                        
+                        deduction_type = deduction.deduction_type
+                        if deduction_type in deduction_details:
+                            deduction_details[deduction_type] += installment
+                        else:
+                            deduction_details[deduction_type] = installment
+                
+                # Initialize other components
+                special_basic = 0
+                da = 0
+                hra = 0
+                overtime_manual = 0
+                others_earnings = 0
+                society = 0
+                income_tax = 0
+                insurance = 0
+                others_recoveries = 0
+                
+                # Calculate totals
+                total_earnings = basic + special_basic + da + hra + overtime_manual + overtime_allowance + others_earnings
+                total_deductions = pf + esic + society + income_tax + insurance + others_recoveries + monthly_deduction_total
+                net_salary = total_earnings - total_deductions
+                
+                # Build result dictionary
+                result = {
+                    'Employee ID': emp_id,
+                    'Employee Name': emp_info['name'],
+                    'Skill Level': emp_info['skill_category'],
+                    'Present Days': present_days,
+                    'Daily Wage': round(daily_wage, 2),
+                    'Basic': round(basic, 2),
+                    'Special Basic': round(special_basic, 2),
+                    'DA': round(da, 2),
+                    'HRA': round(hra, 2),
+                    'Overtime': round(overtime_manual, 2),
+                    'Overtime Allowance': round(overtime_allowance, 2),
+                    'Others': round(others_earnings, 2),
+                    'Total Earnings': round(total_earnings, 2),
+                    'PF': round(pf, 2),
+                    'ESIC': round(esic, 2),
+                    'Society': round(society, 2),
+                    'Income Tax': round(income_tax, 2),
+                    'Insurance': round(insurance, 2),
+                    'Others Recoveries': round(others_recoveries, 2),
+                    'Total Deductions': round(total_deductions, 2),
+                    'Net Salary': round(net_salary, 2)
+                }
+                
+                # Add dynamic deduction details
+                for deduction_type, amount in deduction_details.items():
+                    result[deduction_type] = round(amount, 2)
+                
+                salary_data.append(result)
+            
+            return {
+                'success': True,
+                'message': f'Salary calculated successfully for {len(salary_data)} employees.',
+                'data': salary_data
+            }
+            
+        except Exception as e:
+            import traceback
+            print(traceback.format_exc())
+            return {
+                'success': False,
+                'message': 'An error occurred while generating salary data.',
+                'error': str(e)
+            }
+
+    @staticmethod
+    def calculate_salary_from_attendance_data(df, adjustments_df=None):
+        """
+        Calculate salary using attendance data from Excel upload
+        """
+        try:
             adj = adjustments_df if adjustments_df is not None and not adjustments_df.empty else pd.DataFrame()
 
-            # Identify day-wise columns (your exact logic)
             weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
             attendance_cols = [col for col in df.columns if any(day in col for day in weekdays)]
 
             def calculate(row):
-                # Your exact calculation logic but get wage from employee's salary code
                 days_present = sum(str(row[col]).strip().upper() == 'P' for col in attendance_cols)
-
-                # Get daily wage from employee's salary code
                 employee_id = str(row['Employee ID']).strip()
                 daily_wage = SalaryService.get_employee_daily_wage(employee_id)
 
@@ -107,33 +313,26 @@ class SalaryService:
                 esic = 0.0075 * min(basic, 21000)
                 return pd.Series([days_present, daily_wage, basic, pf, esic])
 
-            # Apply your exact calculation
             df[['Present Days', 'Daily Wage', 'Basic', 'PF', 'ESIC']] = df.apply(calculate, axis=1)
 
-            # Merge optional adjustments (your exact logic)
             if not adj.empty:
                 df = pd.merge(df, adj, on='Employee ID', how='left')
 
-            # Ensure all expected columns exist (your exact logic)
             earnings_cols = ['Special Basic', 'DA', 'HRA', 'Overtime', 'Overtime Allowance', 'Others']
             deduction_cols = ['Society', 'Income Tax', 'Insurance', 'Others Recoveries']
             for col in earnings_cols + deduction_cols:
                 if col not in df.columns:
                     df[col] = 0
 
-            # Calculate overtime allowance for each employee using overtime shifts
             for index, row in df.iterrows():
                 employee_id = str(row['Employee ID']).strip()
                 
-                # Get current year and month from the data or use current date
                 current_date = datetime.now()
                 year = current_date.year
                 month = current_date.month
                 
-                # Get employee object to check for overtime rate
                 employee = Employee.query.filter_by(employee_id=employee_id).first()
                 
-                # Get monthly attendance summary to calculate overtime shifts
                 from services.attendance_service import AttendanceService
                 attendance_summary = AttendanceService.get_monthly_attendance_summary(
                     employee_id, year, month
@@ -141,43 +340,32 @@ class SalaryService:
                 
                 if attendance_summary['success']:
                     summary_data = attendance_summary['data']
-                    
-                    # Step 1: Fetch overtime_shifts from attendance records
                     total_overtime_shifts = summary_data.get('total_overtime_shifts', 0)
-                    
-                    # Step 2: Convert total shifts into overtime hours
                     total_overtime_hours = total_overtime_shifts * 8
                     
-                    # Step 3: Calculate overtime allowance
                     if employee and hasattr(employee, 'overtime_rate_hourly') and employee.overtime_rate_hourly:
                         overtime_rate_hourly = employee.overtime_rate_hourly
                     else:
-                        # Derive hourly rate from daily wage (daily_wage / 8)
                         daily_wage = row['Daily Wage']
                         overtime_rate_hourly = daily_wage / 8
                     
                     overtime_allowance = total_overtime_hours * overtime_rate_hourly
                     
-                    # Step 4: Add overtime allowance to the dataframe
                     df.at[index, 'Overtime Allowance'] = overtime_allowance
                     df.at[index, 'Overtime Shifts'] = total_overtime_shifts
                     df.at[index, 'Overtime Hours'] = total_overtime_hours
                     df.at[index, 'Overtime Rate Hourly'] = overtime_rate_hourly
                 
-                # Get monthly deductions
                 monthly_deduction_total, deduction_details = SalaryService.get_monthly_deductions(employee_id, year, month)
                 
-                # Add deduction details as separate columns
                 for deduction_type, amount in deduction_details.items():
                     if deduction_type not in df.columns:
                         df[deduction_type] = 0
                     df.at[index, deduction_type] = amount
 
-            # Calculate totals (your exact logic)
             df['Total Earnings'] = df[['Basic'] + earnings_cols].sum(axis=1)
             df['Total Deductions'] = df[['PF', 'ESIC'] + deduction_cols].sum(axis=1)
             
-            # Add monthly deductions to total deductions
             for index, row in df.iterrows():
                 employee_id = str(row['Employee ID']).strip()
                 current_date = datetime.now()
@@ -189,8 +377,6 @@ class SalaryService:
             
             df['Net Salary'] = df['Total Earnings'] - df['Total Deductions']
 
-            # Final clean output (your exact logic) - include dynamic deduction columns
-            # Get all deduction types that exist in the dataframe
             deduction_type_cols = [col for col in df.columns if col not in ['Employee ID', 'Employee Name', 'Skill Level', 'Present Days', 'Daily Wage', 'Basic'] + 
                                  earnings_cols + ['Total Earnings', 'PF', 'ESIC'] + deduction_cols + ['Total Deductions', 'Net Salary']]
             
@@ -213,159 +399,6 @@ class SalaryService:
             }
 
     @staticmethod
-    def generate_monthly_salary_data(year, month, site_id=None):
-        """
-        Generate salary calculation data for a specific month using database records
-        Updated to use overtime shifts for overtime allowance calculation
-        site_id: Optional filter to calculate salary only for employees of a specific site
-        """
-        try:
-            # Get employees - filter by site if site_id is provided
-            if site_id:
-                # Get the site name for the selected site_id
-                from models.site import Site
-                site = Site.query.filter_by(site_id=site_id).first()
-                if site:
-                    # Get salary codes for the selected site
-                    from models.wage_master import WageMaster
-                    site_salary_codes = WageMaster.query.filter_by(site_name=site.site_name).with_entities(WageMaster.salary_code).all()
-                    site_salary_codes = [code[0] for code in site_salary_codes]
-
-                    if site_salary_codes:
-                        employees = Employee.query.filter(Employee.salary_code.in_(site_salary_codes)).all()
-                    else:
-                        employees = []
-                else:
-                    employees = []
-            else:
-                employees = Employee.query.all()
-
-            if not employees:
-                return {
-                    'success': False,
-                    'message': 'No employees found'
-                }
-
-            # Create DataFrame structure for your salary calculation logic
-            salary_data = []
-
-            for employee in employees:
-                # Get monthly attendance summary
-                from services.attendance_service import AttendanceService
-                attendance_summary = AttendanceService.get_monthly_attendance_summary(
-                    employee.employee_id, year, month
-                )
-
-                if not attendance_summary['success']:
-                    continue
-
-                summary_data = attendance_summary['data']
-
-                # Create row data matching your expected format
-                row_data = {
-                    'Employee ID': employee.employee_id,
-                    'Employee Name': f"{employee.first_name} {employee.last_name}",
-                    'Skill Level': employee.skill_category or 'Un-Skilled',  # Default to Un-Skilled if not set
-                }
-
-                # Add day-wise attendance (simplified - using present days for now)
-                present_days = summary_data['present_days']
-                row_data['Present Days Count'] = present_days
-
-                salary_data.append(row_data)
-
-            # Convert to DataFrame
-            df = pd.DataFrame(salary_data)
-
-            if df.empty:
-                return {
-                    'success': False,
-                    'message': 'No salary data to calculate'
-                }
-
-            # For this simplified version, we'll calculate directly without day-wise columns
-            def calculate_simplified(row):
-                days_present = row['Present Days Count']
-                employee_id = str(row['Employee ID']).strip()
-
-                # Get daily wage from employee's salary code
-                daily_wage = SalaryService.get_employee_daily_wage(employee_id)
-
-                basic = days_present * daily_wage
-                pf = 0.12 * min(basic, 15000)
-                esic = 0.0075 * min(basic, 21000)
-                return pd.Series([days_present, daily_wage, basic, pf, esic])
-
-            df[['Present Days', 'Daily Wage', 'Basic', 'PF', 'ESIC']] = df.apply(calculate_simplified, axis=1)
-
-            # Add default values for earnings and deductions
-            earnings_cols = ['Special Basic', 'DA', 'HRA', 'Overtime', 'Overtime Allowance', 'Others']
-            deduction_cols = ['Society', 'Income Tax', 'Insurance', 'Others Recoveries']
-            for col in earnings_cols + deduction_cols:
-                df[col] = 0
-
-            # Calculate overtime allowance for each employee using overtime shifts
-            for index, row in df.iterrows():
-                employee_id = str(row['Employee ID']).strip()
-                
-                # Get employee object to check for overtime rate
-                employee = Employee.query.filter_by(employee_id=employee_id).first()
-                
-                # Get monthly attendance summary to calculate overtime shifts
-                attendance_summary = AttendanceService.get_monthly_attendance_summary(
-                    employee_id, year, month
-                )
-                
-                if attendance_summary['success']:
-                    summary_data = attendance_summary['data']
-                    
-                    # Step 1: Fetch overtime_shifts from attendance records
-                    total_overtime_shifts = summary_data.get('total_overtime_shifts', 0)
-                    
-                    # Step 2: Convert total shifts into overtime hours
-                    total_overtime_hours = total_overtime_shifts * 8
-                    
-                    # Step 3: Calculate overtime allowance
-                    if employee and hasattr(employee, 'overtime_rate_hourly') and employee.overtime_rate_hourly:
-                        overtime_rate_hourly = employee.overtime_rate_hourly
-                    else:
-                        # Derive hourly rate from daily wage (daily_wage / 8)
-                        daily_wage = row['Daily Wage']
-                        overtime_rate_hourly = daily_wage / 8
-                    
-                    overtime_allowance = total_overtime_hours * overtime_rate_hourly
-                    
-                    # Step 4: Add overtime allowance to the dataframe
-                    df.at[index, 'Overtime Allowance'] = overtime_allowance
-                    df.at[index, 'Overtime Shifts'] = total_overtime_shifts
-                    df.at[index, 'Overtime Hours'] = total_overtime_hours
-                    df.at[index, 'Overtime Rate Hourly'] = overtime_rate_hourly
-
-            # Calculate totals
-            df['Total Earnings'] = df[['Basic'] + earnings_cols].sum(axis=1)
-            df['Total Deductions'] = df[['PF', 'ESIC'] + deduction_cols].sum(axis=1)
-            df['Net Salary'] = df['Total Earnings'] - df['Total Deductions']
-
-            # Final output
-            final_cols = ['Employee ID', 'Employee Name', 'Skill Level', 'Present Days', 'Daily Wage', 'Basic'] + \
-                         earnings_cols + ['Total Earnings', 'PF', 'ESIC'] + deduction_cols + \
-                         ['Total Deductions', 'Net Salary']
-            output = df[final_cols].fillna(0).to_dict(orient='records')
-
-            return {
-                'success': True,
-                'message': 'Salary calculated successfully.',
-                'data': output
-            }
-
-        except Exception as e:
-            return {
-                'success': False,
-                'message': 'An error occurred while generating salary data.',
-                'error': str(e)
-            }
-
-    @staticmethod
     def calculate_individual_salary(employee_id, year, month, adjustments=None):
         """
         Calculate salary for a single employee
@@ -378,7 +411,6 @@ class SalaryService:
                     'message': 'Employee not found'
                 }
 
-            # Get attendance data
             from services.attendance_service import AttendanceService
             attendance_summary = AttendanceService.get_monthly_attendance_summary(
                 employee_id, year, month
@@ -388,14 +420,9 @@ class SalaryService:
                 return attendance_summary
 
             summary_data = attendance_summary['data']
-
-            # Calculate using your logic with employee's salary code
             days_present = summary_data['present_days']
-
-            # Get daily wage from employee's salary code
             daily_wage = SalaryService.get_employee_daily_wage(employee_id)
 
-            # Get skill level for display - prioritize employee's skill_category
             if employee.skill_category and employee.skill_category.strip():
                 skill_level = employee.skill_category
             elif employee.wage_master and employee.wage_master.skill_level and employee.wage_master.skill_level.strip() and employee.wage_master.skill_level != 'Not Specified':
@@ -407,12 +434,10 @@ class SalaryService:
             pf = 0.12 * min(basic, 15000)
             esic = 0.0075 * min(basic, 21000)
             
-            # Calculate overtime allowance using the new overtime shifts logic
             overtime_allowance, total_overtime_shifts, total_overtime_hours, overtime_rate_hourly = SalaryService.calculate_overtime_allowance(
                 employee_id, year, month
             )
 
-            # Apply adjustments if provided
             special_basic = adjustments.get('Special Basic', 0) if adjustments else 0
             da = adjustments.get('DA', 0) if adjustments else 0
             hra = adjustments.get('HRA', 0) if adjustments else 0
@@ -427,10 +452,7 @@ class SalaryService:
             total_earnings = basic + special_basic + da + hra + overtime + overtime_allowance + others_earnings
             total_deductions = pf + esic + society + income_tax + insurance + others_recoveries
             
-            # Get monthly deductions from the deductions module
             monthly_deduction_total, deduction_details = SalaryService.get_monthly_deductions(employee_id, year, month)
-            
-            # Add monthly deductions to total deductions
             total_deductions += monthly_deduction_total
             
             net_salary = total_earnings - total_deductions
@@ -462,7 +484,6 @@ class SalaryService:
                 'Net Salary': net_salary
             }
             
-            # Add deduction details to result (only if deductions exist)
             for deduction_type, amount in deduction_details.items():
                 result[deduction_type] = amount
 
@@ -483,20 +504,13 @@ class SalaryService:
     def calculate_overtime_allowance(employee_id, year, month):
         """
         Calculate overtime allowance for an employee using overtime shifts
-        This method implements the new overtime calculation logic:
-        1. Fetch overtime_shifts from attendance records
-        2. Convert total shifts into overtime hours (overtime_hours = overtime_shifts * 8)
-        3. Calculate overtime allowance (overtime_allowance = overtime_hours * overtime_rate)
-        
         Returns: (overtime_allowance, overtime_shifts, overtime_hours, overtime_rate_hourly)
         """
         try:
-            # Get employee object to check for overtime rate
             employee = Employee.query.filter_by(employee_id=employee_id).first()
             if not employee:
                 return 0.0, 0.0, 0.0, 0.0
 
-            # Get monthly attendance summary
             from services.attendance_service import AttendanceService
             attendance_summary = AttendanceService.get_monthly_attendance_summary(
                 employee_id, year, month
@@ -506,18 +520,12 @@ class SalaryService:
                 return 0.0, 0.0, 0.0, 0.0
 
             summary_data = attendance_summary['data']
-
-            # Step 1: Fetch overtime_shifts from attendance records
             total_overtime_shifts = summary_data.get('total_overtime_shifts', 0)
-
-            # Step 2: Convert total shifts into overtime hours
             total_overtime_hours = total_overtime_shifts * 8
 
-            # Step 3: Calculate overtime allowance
             if hasattr(employee, 'overtime_rate_hourly') and employee.overtime_rate_hourly:
                 overtime_rate_hourly = employee.overtime_rate_hourly
             else:
-                # Derive hourly rate from daily wage (daily_wage / 8)
                 daily_wage = SalaryService.get_employee_daily_wage(employee_id)
                 overtime_rate_hourly = daily_wage / 8
 
@@ -533,7 +541,6 @@ class SalaryService:
     def get_employee_overtime_summary(employee_id, year, month):
         """
         Get detailed overtime summary for an employee
-        Returns overtime shifts, hours, rate, and allowance
         """
         try:
             overtime_allowance, overtime_shifts, overtime_hours, overtime_rate = SalaryService.calculate_overtime_allowance(
