@@ -2,6 +2,7 @@ from flask import Blueprint, request, jsonify
 from services.employee_service import create_employee, bulk_import_from_frames, get_employee_by_id, get_all_employees, get_all_employees_unpaginated, search_employees
 from models import db
 from models.employee import Employee
+from models.wage_master import WageMaster
 from utils.upload import save_file
 from models.account_details import AccountDetails
 from routes.auth import token_required
@@ -395,7 +396,18 @@ def bulk_upload_optimized():
                     # Handle custom employee ID if provided
                     if custom_employee_id:
                         employee_data['employee_id'] = custom_employee_id
-                    
+
+                    # Validate salary_code exists in wage_masters
+                    salary_code = employee_data.get('salary_code')
+                    if salary_code and salary_code != 'DEFAULT':
+                        wage_master_exists = WageMaster.query.filter_by(salary_code=salary_code).first()
+                        if not wage_master_exists:
+                            errors.append({
+                                "row": idx + 2,
+                                "error": f"Invalid salary code: The provided salary code '{salary_code}' does not exist in the wage masters. Please verify and try again."
+                            })
+                            continue
+
                     employees_to_insert.append(employee_data)
 
                     # Prepare account data with defaults (will be linked after employee creation)

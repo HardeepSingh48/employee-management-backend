@@ -18,6 +18,12 @@ def create_employee(payload: dict) -> Employee:
             payload.get("skill_level", "Skilled")
         )
 
+    # Validate salary_code exists in wage_masters if provided
+    if salary_code and salary_code != 'DEFAULT':
+        wage_master_exists = WageMaster.query.filter_by(salary_code=salary_code).first()
+        if not wage_master_exists:
+            raise ValueError(f"Invalid salary code: The provided salary code '{salary_code}' does not exist in the wage masters. Please verify and try again.")
+
     # Parse date fields
     date_of_birth = _parse_date(payload.get("date_of_birth"))
     hire_date = _parse_date(payload.get("hire_date") or payload.get("date_of_joining"))
