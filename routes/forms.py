@@ -295,6 +295,7 @@ def download_form_b_excel():
                     'CIT': row['deductions']['cit'],
                     'PTAX': row['deductions']['ptax'],
                     'ADV': row['deductions']['adv'],
+                    'Other Recoveries': row['deductions']['otherRecoveries'],
                     'Total Deductions': row['deductions']['total'],
                     'Net Payable': row['netPayable']
                 }
@@ -323,6 +324,7 @@ def download_form_b_excel():
                 'CIT': '',
                 'PTAX': '',
                 'ADV': '',
+                'Other Recoveries': totals['totalOtherRecoveries'],
                 'Total Deductions': totals['totalDeductions'],
                 'Net Payable': totals['totalNetPayable']
             }
@@ -354,11 +356,11 @@ def download_form_b_excel():
                 cell.alignment = Alignment(horizontal='center')
 
             # Merge cells for headers to span across columns
-            worksheet.merge_cells('A1:W1')  # Form B
-            worksheet.merge_cells('A2:W2')  # Format For Wage Register
-            worksheet.merge_cells('A3:W3')  # Rate of minimum wages with date
-            worksheet.merge_cells('A4:W4')  # SSPL
-            worksheet.merge_cells('A5:W5')  # Month and Site info
+            worksheet.merge_cells('A1:X1')  # Form B
+            worksheet.merge_cells('A2:X2')  # Format For Wage Register
+            worksheet.merge_cells('A3:X3')  # Rate of minimum wages with date
+            worksheet.merge_cells('A4:X4')  # SSPL
+            worksheet.merge_cells('A5:X5')  # Month and Site info
         
         output.seek(0)
         
