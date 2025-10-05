@@ -3,7 +3,7 @@ from services.attendance_service import AttendanceService
 from models import db
 from models.employee import Employee
 from models.attendance import Attendance
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 import json
 import pandas as pd
 from io import BytesIO
@@ -157,8 +157,30 @@ def mark_attendance(current_user):
         if not employee_id:
             return jsonify({"success": False, "message": "Employee ID is required"}), 400
 
-        # For supervisors, verify employee belongs to their site through salary codes
-        if current_user.role == 'supervisor':
+        # Optional fields with defaults
+        attendance_date = data.get('attendance_date', date.today().isoformat())
+
+        # Role-based validation
+        today = date.today()
+
+        if current_user.role == 'employee':
+            # Employees can only mark their own attendance for today
+            if employee_id != current_user.employee_id:
+                return jsonify({"success": False, "message": "Employees can only mark their own attendance"}), 403
+
+            # Employees can only mark for today
+            try:
+                requested_date = datetime.strptime(attendance_date, '%Y-%m-%d').date()
+                if requested_date != today:
+                    return jsonify({
+                        "success": False,
+                        "message": "Employees can only mark attendance for the current day"
+                    }), 403
+            except ValueError:
+                return jsonify({"success": False, "message": "Invalid date format"}), 400
+
+        elif current_user.role == 'supervisor':
+            # Supervisors can only mark attendance for employees in their site
             from models.wage_master import WageMaster
             from models.site import Site
             employee = Employee.query.join(
@@ -172,8 +194,20 @@ def mark_attendance(current_user):
             if not employee:
                 return jsonify({"success": False, "message": "Employee not found or not in your site"}), 403
 
-        # Optional fields with defaults
-        attendance_date = data.get('attendance_date', date.today().isoformat())
+            # Supervisors can mark for current day and previous 3 days
+            try:
+                requested_date = datetime.strptime(attendance_date, '%Y-%m-%d').date()
+                min_allowed_date = today - timedelta(days=3)
+
+                if requested_date < min_allowed_date or requested_date > today:
+                    return jsonify({
+                        "success": False,
+                        "message": "Supervisors can only mark attendance for the current day and the previous 3 days"
+                    }), 403
+            except ValueError:
+                return jsonify({"success": False, "message": "Invalid date format"}), 400
+
+        # Admins have no restrictions - they can mark any date for any employee
         attendance_status = data.get('attendance_status', 'Present')
         marked_by = current_user.role if current_user.role in ['supervisor', 'admin'] else 'employee'
 
@@ -249,9 +283,33 @@ def bulk_mark_attendance(current_user):
         attendance_records = data['attendance_records']
         marked_by = current_user.role
 
-        # For supervisors, verify all employees belong to their site through salary codes
-        if current_user.role == 'supervisor':
+        # Role-based validation for bulk operations
+        today = date.today()
+
+        if current_user.role == 'employee':
+            # Employees cannot perform bulk operations
+            return jsonify({"success": False, "message": "Employees cannot perform bulk attendance operations"}), 403
+
+        elif current_user.role == 'supervisor':
+            # Supervisors can only mark attendance for employees in their site
+            from models.wage_master import WageMaster
+            from models.site import Site
+
+            min_allowed_date = today - timedelta(days=3)
+
             for record in attendance_records:
+                # Validate date range for supervisors
+                if record.get('attendance_date'):
+                    try:
+                        requested_date = datetime.strptime(record['attendance_date'], '%Y-%m-%d').date()
+                        if requested_date < min_allowed_date or requested_date > today:
+                            return jsonify({
+                                "success": False,
+                                "message": f"Supervisors can only mark attendance for the current day and the previous 3 days. Date {record['attendance_date']} is not allowed."
+                            }), 403
+                    except ValueError:
+                        return jsonify({"success": False, "message": f"Invalid date format for employee {record.get('employee_id')}"}), 400
+
                 employee = Employee.query.join(
                     WageMaster, Employee.salary_code == WageMaster.salary_code
                 ).join(
@@ -265,6 +323,8 @@ def bulk_mark_attendance(current_user):
                         "success": False,
                         "message": f"Employee {record.get('employee_id')} not found or not in your site"
                     }), 403
+
+        # Admins have no restrictions for bulk operations
 
         # Process datetime fields and overtime data for each record
         for record in attendance_records:
