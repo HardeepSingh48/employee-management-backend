@@ -2,6 +2,7 @@ from flask import Blueprint, request, jsonify
 from services.salary_service import SalaryService
 import pandas as pd
 import io
+from openpyxl.styles import NamedStyle
 
 salary_bp = Blueprint("salary", __name__)
 
@@ -200,7 +201,7 @@ def download_adjustments_template():
 @salary_bp.route("/export", methods=["POST"])
 def export_salary_data():
     """
-    Export calculated salary data to Excel
+    Export calculated salary data to Excel with proper formatting
     """
     try:
         data = request.get_json()
@@ -213,13 +214,73 @@ def export_salary_data():
 
         salary_data = data['salary_data']
 
+        # Handle both single record (dict) and multiple records (list of dicts)
+        if isinstance(salary_data, dict):
+            # Single salary record - wrap in list for DataFrame
+            salary_data = [salary_data]
+
         # Convert to DataFrame
         df = pd.DataFrame(salary_data)
 
-        # Create Excel file in memory
+        # Define expected column order for better readability
+        expected_columns = [
+            'Employee ID', 'Employee Name', 'Skill Level', 'Present Days',
+            'Basic', 'Special Basic', 'DA', 'HRA', 'Overtime', 'Overtime Allowance',
+            'Clothes', 'Others', 'Total Earnings',
+            'PF', 'ESIC', 'Society', 'Income Tax', 'Insurance', 'Others Recoveries',
+            'Total Deductions', 'Net Salary'
+        ]
+
+        # Reorder columns if they exist in the data
+        existing_columns = [col for col in expected_columns if col in df.columns]
+        remaining_columns = [col for col in df.columns if col not in existing_columns]
+        final_columns = existing_columns + remaining_columns
+
+        df = df[final_columns]
+
+        # Format numeric columns
+        numeric_columns = [
+            'Basic', 'Special Basic', 'DA', 'HRA', 'Overtime', 'Overtime Allowance',
+            'Clothes', 'Others', 'Total Earnings', 'PF', 'ESIC', 'Society',
+            'Income Tax', 'Insurance', 'Others Recoveries', 'Total Deductions', 'Net Salary'
+        ]
+
+        for col in numeric_columns:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce').round(2)
+
+        # Create Excel file in memory with better formatting
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
             df.to_excel(writer, sheet_name='Salary Report', index=False)
+
+            # Get the workbook and worksheet for formatting
+            workbook = writer.book
+            worksheet = writer.sheets['Salary Report']
+
+            # Auto-adjust column widths
+            for column in worksheet.columns:
+                max_length = 0
+                column_letter = column[0].column_letter
+
+                for cell in column:
+                    try:
+                        if len(str(cell.value)) > max_length:
+                            max_length = len(str(cell.value))
+                    except:
+                        pass
+
+                adjusted_width = min(max_length + 2, 50)  # Max width of 50
+                worksheet.column_dimensions[column_letter].width = adjusted_width
+
+            # Format numeric columns
+            currency_style = NamedStyle(name='currency', number_format='#,##0.00')
+
+            for col_num, column_title in enumerate(df.columns, 1):
+                if column_title in numeric_columns:
+                    for row_num in range(2, len(df) + 2):  # Start from row 2 (after header)
+                        cell = worksheet.cell(row=row_num, column=col_num)
+                        cell.style = currency_style
 
         output.seek(0)
 
@@ -229,6 +290,8 @@ def export_salary_data():
         }
 
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return jsonify({
             "success": False,
             "message": f"Error exporting salary data: {str(e)}"
