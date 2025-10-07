@@ -9,82 +9,183 @@ import calendar
 
 class AttendanceService:
     
+    # @staticmethod
+    # def mark_attendance(employee_id, attendance_date, attendance_status,
+    #                    check_in_time=None, check_out_time=None,
+    #                    overtime_shifts=0.0, remarks=None, marked_by='employee'):
+    #     """
+    #     Mark attendance for an employee on a specific date
+    #     """
+    #     try:
+    #         # Check if employee exists
+    #         employee = Employee.query.filter_by(employee_id=employee_id).first()
+    #         if not employee:
+    #             return {"success": False, "message": "Employee not found"}
+
+    #         # Parse attendance_date if it's a string
+    #         if isinstance(attendance_date, str):
+    #             attendance_date = datetime.strptime(attendance_date, '%Y-%m-%d').date()
+
+    #         # Check if attendance already exists for this date
+    #         existing_attendance = Attendance.query.filter_by(
+    #             employee_id=employee_id,
+    #             attendance_date=attendance_date
+    #         ).first()
+
+    #         if existing_attendance:
+    #             return {"success": False, "message": "Attendance already marked for this date"}
+
+    #         # Check if it's a holiday
+    #         is_holiday_date, holiday = Holiday.is_holiday(attendance_date)
+
+    #         # Check if it's weekend
+    #         is_weekend = attendance_date.weekday() >= 5  # Saturday = 5, Sunday = 6
+
+    #         # Calculate work hours and lateness
+    #         total_hours_worked = 8.0  # Default
+    #         late_minutes = 0
+
+    #         if check_in_time and check_out_time:
+    #             total_hours_worked = Attendance.calculate_work_hours(check_in_time, check_out_time)
+    #             is_late, late_minutes = Attendance.is_late(check_in_time)
+
+    #             # Adjust status if late
+    #             if is_late and attendance_status == 'Present':
+    #                 attendance_status = 'Late'
+
+    #         # Create attendance record
+    #         attendance = Attendance(
+    #             employee_id=employee_id,
+    #             attendance_date=attendance_date,
+    #             check_in_time=check_in_time,
+    #             check_out_time=check_out_time,
+    #             attendance_status=attendance_status,
+    #             overtime_shifts=overtime_shifts,
+    #             late_minutes=late_minutes,
+    #             total_hours_worked=total_hours_worked,
+    #             is_holiday=is_holiday_date,
+    #             is_weekend=is_weekend,
+    #             remarks=remarks,
+    #             marked_by=marked_by,
+    #             created_by=marked_by
+    #         )
+
+    #         db.session.add(attendance)
+    #         db.session.commit()
+
+    #         return {
+    #             "success": True,
+    #             "message": "Attendance marked successfully",
+    #             "data": attendance.to_dict()
+    #         }
+
+    #     except IntegrityError:
+    #         db.session.rollback()
+    #         return {"success": False, "message": "Attendance already exists for this date"}
+    #     except Exception as e:
+    #         db.session.rollback()
+    #         return {"success": False, "message": f"Error marking attendance: {str(e)}"}
+
     @staticmethod
-    def mark_attendance(employee_id, attendance_date, attendance_status, 
-                       check_in_time=None, check_out_time=None, 
-                       overtime_shifts=0.0, remarks=None, marked_by='employee'):
+    def mark_or_update_attendance(employee_id, attendance_date, attendance_status,
+                               check_in_time=None, check_out_time=None,
+                               overtime_shifts=0.0, remarks=None, marked_by='employee'):
         """
-        Mark attendance for an employee on a specific date
+        Mark attendance OR update if already exists
+        Returns: dict with 'created' flag to indicate if new record or update
         """
         try:
             # Check if employee exists
             employee = Employee.query.filter_by(employee_id=employee_id).first()
             if not employee:
                 return {"success": False, "message": "Employee not found"}
-            
-            # Parse attendance_date if it's a string
+
+            # Parse attendance_date if string
             if isinstance(attendance_date, str):
                 attendance_date = datetime.strptime(attendance_date, '%Y-%m-%d').date()
-            
-            # Check if attendance already exists for this date
+
+            # Query for existing attendance record with employee_id + attendance_date
             existing_attendance = Attendance.query.filter_by(
-                employee_id=employee_id, 
+                employee_id=employee_id,
                 attendance_date=attendance_date
             ).first()
-            
-            if existing_attendance:
-                return {"success": False, "message": "Attendance already marked for this date"}
-            
-            # Check if it's a holiday
+
+            # Calculate: is_holiday, is_weekend, total_hours_worked, late_minutes
             is_holiday_date, holiday = Holiday.is_holiday(attendance_date)
-            
-            # Check if it's weekend
             is_weekend = attendance_date.weekday() >= 5  # Saturday = 5, Sunday = 6
-            
-            # Calculate work hours and lateness
+
             total_hours_worked = 8.0  # Default
             late_minutes = 0
-            
+
             if check_in_time and check_out_time:
                 total_hours_worked = Attendance.calculate_work_hours(check_in_time, check_out_time)
                 is_late, late_minutes = Attendance.is_late(check_in_time)
-                
+
                 # Adjust status if late
                 if is_late and attendance_status == 'Present':
                     attendance_status = 'Late'
-            
-            # Create attendance record
-            attendance = Attendance(
-                employee_id=employee_id,
-                attendance_date=attendance_date,
-                check_in_time=check_in_time,
-                check_out_time=check_out_time,
-                attendance_status=attendance_status,
-                overtime_shifts=overtime_shifts,
-                late_minutes=late_minutes,
-                total_hours_worked=total_hours_worked,
-                is_holiday=is_holiday_date,
-                is_weekend=is_weekend,
-                remarks=remarks,
-                marked_by=marked_by,
-                created_by=marked_by
-            )
-            
-            db.session.add(attendance)
-            db.session.commit()
-            
-            return {
-                "success": True, 
-                "message": "Attendance marked successfully",
-                "data": attendance.to_dict()
-            }
-            
-        except IntegrityError:
-            db.session.rollback()
-            return {"success": False, "message": "Attendance already exists for this date"}
+
+            # Adjust total_hours_worked based on status
+            if attendance_status == 'Half Day':
+                total_hours_worked = 4.0
+            elif attendance_status == 'Absent':
+                total_hours_worked = 0.0
+            # For Present/Late, keep calculated or default 8.0
+
+            if existing_attendance:
+                # UPDATE existing record
+                existing_attendance.check_in_time = check_in_time
+                existing_attendance.check_out_time = check_out_time
+                existing_attendance.attendance_status = attendance_status
+                existing_attendance.overtime_shifts = overtime_shifts
+                existing_attendance.late_minutes = late_minutes
+                existing_attendance.total_hours_worked = total_hours_worked
+                existing_attendance.is_holiday = is_holiday_date
+                existing_attendance.is_weekend = is_weekend
+                existing_attendance.remarks = remarks
+                existing_attendance.marked_by = marked_by
+                existing_attendance.updated_by = marked_by
+                existing_attendance.updated_date = datetime.now()
+
+                db.session.commit()
+
+                return {
+                    "success": True,
+                    "message": "Attendance updated successfully",
+                    "created": False,
+                    "data": existing_attendance.to_dict()
+                }
+            else:
+                # CREATE new Attendance object
+                attendance = Attendance(
+                    employee_id=employee_id,
+                    attendance_date=attendance_date,
+                    check_in_time=check_in_time,
+                    check_out_time=check_out_time,
+                    attendance_status=attendance_status,
+                    overtime_shifts=overtime_shifts,
+                    late_minutes=late_minutes,
+                    total_hours_worked=total_hours_worked,
+                    is_holiday=is_holiday_date,
+                    is_weekend=is_weekend,
+                    remarks=remarks,
+                    marked_by=marked_by,
+                    created_by=marked_by
+                )
+
+                db.session.add(attendance)
+                db.session.commit()
+
+                return {
+                    "success": True,
+                    "message": "Attendance marked successfully",
+                    "created": True,
+                    "data": attendance.to_dict()
+                }
+
         except Exception as e:
             db.session.rollback()
-            return {"success": False, "message": f"Error marking attendance: {str(e)}"}
+            return {"success": False, "message": f"Error marking/updating attendance: {str(e)}"}
     
     @staticmethod
     def bulk_mark_attendance(attendance_records, marked_by='admin'):

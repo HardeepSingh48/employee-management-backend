@@ -240,7 +240,7 @@ def mark_attendance(current_user):
         overtime_shifts = round_to_half(overtime_shifts)
         
         # Mark attendance
-        result = AttendanceService.mark_attendance(
+        result = AttendanceService.mark_or_update_attendance(
             employee_id=employee_id,
             attendance_date=attendance_date,
             attendance_status=attendance_status,
@@ -252,7 +252,7 @@ def mark_attendance(current_user):
         )
 
         if result["success"]:
-            return jsonify(result), 201
+            return jsonify(result), 201 if result.get("created") else 200
         else:
             return jsonify(result), 400
 
@@ -1204,14 +1204,16 @@ def bulk_mark_attendance_excel(current_user):
                 # Process each date column for this employee
                 first_working_day_processed = False
                 for col in date_columns:
-                    # Skip blank values
-                    if pd.isna(row[col]) or str(row[col]).strip() == '':
-                        continue
-
                     try:
-                        attendance_value = normalize_attendance_value(row[col])
-                        if not attendance_value:
-                            continue
+                        cell_value = row[col]
+
+                        # FIX: Don't skip empty - mark as Absent
+                        if pd.isna(cell_value) or str(cell_value).strip() == '':
+                            attendance_value = 'Absent'
+                        else:
+                            attendance_value = normalize_attendance_value(cell_value)
+                            if not attendance_value:
+                                attendance_value = 'Absent'
 
                         # Parse date from column
                         year_from_col, month_from_col, day_from_col = parse_date_from_column(col)
@@ -1244,10 +1246,21 @@ def bulk_mark_attendance_excel(current_user):
                                 existing.marked_by = current_user.role
                                 existing.updated_by = current_user.email
                                 existing.updated_date = datetime.utcnow()
+                                # Update total_hours_worked based on status
+                                if attendance_value == 'Half Day':
+                                    existing.total_hours_worked = 4.0
+                                elif attendance_value == 'Absent':
+                                    existing.total_hours_worked = 0.0
+                                else:
+                                    existing.total_hours_worked = 8.0
+                                # ADD THIS LINE:
+                                db.session.add(existing)  # Mark for update in session
                                 updated_records.append(existing)
                                 results["updated_records"] += 1
                             else:
                                 # Prepare for bulk insert
+                                # Calculate total_hours_worked based on status
+                                total_hours_worked = 8.0 if attendance_value not in ['Absent', 'Half Day'] else (4.0 if attendance_value == 'Half Day' else 0.0)
                                 new_record = {
                                     'attendance_id': str(uuid.uuid4()),
                                     'employee_id': employee.employee_id,
@@ -1257,7 +1270,7 @@ def bulk_mark_attendance_excel(current_user):
                                     'marked_by': current_user.role,
                                     'created_by': current_user.email,
                                     'created_date': datetime.utcnow(),
-                                    'total_hours_worked': 8.0,
+                                    'total_hours_worked': total_hours_worked,
                                     'is_approved': True,
                                     'is_weekend': attendance_date.weekday() >= 5,
                                     'is_holiday': False  # You can enhance this with holiday check
