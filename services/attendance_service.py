@@ -436,6 +436,108 @@ class AttendanceService:
             }
 
     @staticmethod
+    def get_monthly_attendance_report(site_id, start_date, end_date):
+        """
+        Generate monthly attendance report data for Excel export
+        Returns all employees in site with attendance data for each date
+        """
+        try:
+            from models.wage_master import WageMaster
+            from models.site import Site
+
+            # Parse dates
+            if isinstance(start_date, str):
+                start_date = datetime.strptime(start_date, '%Y-%m-%d').date()
+            if isinstance(end_date, str):
+                end_date = datetime.strptime(end_date, '%Y-%m-%d').date()
+
+            # Get all employees in the site, sorted by employee_id
+            employees = Employee.query.join(
+                WageMaster, Employee.salary_code == WageMaster.salary_code
+            ).join(
+                Site, WageMaster.site_name == Site.site_name
+            ).filter(
+                Site.site_id == site_id
+            ).order_by(Employee.employee_id.asc()).all()
+
+            # Get all attendance records for the date range and site
+            attendance_records = Attendance.query.join(Employee).join(
+                WageMaster, Employee.salary_code == WageMaster.salary_code
+            ).join(
+                Site, WageMaster.site_name == Site.site_name
+            ).filter(
+                Site.site_id == site_id,
+                Attendance.attendance_date >= start_date,
+                Attendance.attendance_date <= end_date
+            ).all()
+
+            # Create attendance lookup: employee_id -> date -> attendance_record
+            attendance_lookup = {}
+            for record in attendance_records:
+                emp_id = record.employee_id
+                date_key = record.attendance_date.isoformat()
+                if emp_id not in attendance_lookup:
+                    attendance_lookup[emp_id] = {}
+                attendance_lookup[emp_id][date_key] = record
+
+            # Generate date range
+            date_range = []
+            current_date = start_date
+            while current_date <= end_date:
+                date_range.append(current_date)
+                current_date += timedelta(days=1)
+
+            # Prepare report data
+            report_data = []
+            for employee in employees:
+                emp_id = employee.employee_id
+                emp_name = f"{employee.first_name or ''} {employee.last_name or ''}".strip()
+                if not emp_name:
+                    emp_name = emp_id
+
+                # Initialize employee row
+                employee_row = {
+                    'Employee ID': emp_id,
+                    'Employee Name': emp_name,
+                }
+
+                # Add attendance data for each date
+                total_overtime = 0.0
+                for date in date_range:
+                    date_key = date.isoformat()
+                    date_str = date.strftime('%d/%m/%Y')
+
+                    if emp_id in attendance_lookup and date_key in attendance_lookup[emp_id]:
+                        record = attendance_lookup[emp_id][date_key]
+                        status = record.attendance_status
+                        overtime = record.overtime_shifts
+                        total_overtime += overtime
+                    else:
+                        status = 'Absent'
+                        overtime = 0.0
+
+                    employee_row[date_str] = status
+
+                # Add total overtime column
+                employee_row['Total Overtime Shifts'] = total_overtime
+
+                report_data.append(employee_row)
+
+            return {
+                'success': True,
+                'data': report_data,
+                'date_range': [d.strftime('%d/%m/%Y') for d in date_range],
+                'employee_count': len(employees),
+                'site_id': site_id
+            }
+
+        except Exception as e:
+            return {
+                'success': False,
+                'message': f'Error generating monthly attendance report: {str(e)}'
+            }
+
+    @staticmethod
     def update_attendance(attendance_id, **kwargs):
         """
         Update existing attendance record
@@ -444,26 +546,26 @@ class AttendanceService:
             attendance = Attendance.query.get(attendance_id)
             if not attendance:
                 return {"success": False, "message": "Attendance record not found"}
-            
+
             # Update allowed fields
-            allowed_fields = ['attendance_status', 'check_in_time', 'check_out_time', 
+            allowed_fields = ['attendance_status', 'check_in_time', 'check_out_time',
                             'overtime_shifts', 'remarks', 'is_approved', 'approved_by']
-            
+
             for field, value in kwargs.items():
                 if field in allowed_fields and hasattr(attendance, field):
                     setattr(attendance, field, value)
-            
+
             attendance.updated_date = datetime.now()
             attendance.updated_by = kwargs.get('updated_by', 'system')
-            
+
             db.session.commit()
-            
+
             return {
                 "success": True,
                 "message": "Attendance updated successfully",
                 "data": attendance.to_dict()
             }
-            
+
         except Exception as e:
             db.session.rollback()
             return {"success": False, "message": f"Error updating attendance: {str(e)}"}

@@ -1350,6 +1350,114 @@ def bulk_mark_attendance_excel(current_user):
             "message": f"Error processing file: {str(e)}"
         }), 500
 
+@attendance_bp.route("/monthly-report-excel", methods=["GET"])
+@token_required
+def generate_monthly_attendance_report_excel(current_user):
+    """
+    Generate and download monthly attendance report as Excel file
+    Query parameters:
+    - start_date: YYYY-MM-DD (required)
+    - end_date: YYYY-MM-DD (required)
+    - site_id: Site ID (optional, defaults to user's site for supervisors)
+    """
+    try:
+        # Get query parameters
+        start_date = request.args.get('start_date')
+        end_date = request.args.get('end_date')
+        site_id = request.args.get('site_id')
+
+        # Validate required parameters
+        if not start_date or not end_date:
+            return jsonify({
+                "success": False,
+                "message": "start_date and end_date are required parameters"
+            }), 400
+
+        # Determine site_id based on user role
+        if current_user.role == 'supervisor':
+            if not current_user.site_id:
+                return jsonify({
+                    "success": False,
+                    "message": "Supervisor site not configured"
+                }), 403
+            effective_site_id = current_user.site_id
+        elif current_user.role == 'admin':
+            if not site_id:
+                return jsonify({
+                    "success": False,
+                    "message": "site_id is required for admin users"
+                }), 400
+            effective_site_id = site_id
+        else:
+            return jsonify({
+                "success": False,
+                "message": "Unauthorized access"
+            }), 403
+
+        # Generate report data
+        result = AttendanceService.get_monthly_attendance_report(
+            site_id=effective_site_id,
+            start_date=start_date,
+            end_date=end_date
+        )
+
+        if not result["success"]:
+            return jsonify(result), 400
+
+        report_data = result["data"]
+        date_range = result["date_range"]
+
+        if not report_data:
+            return jsonify({
+                "success": False,
+                "message": "No data found for the specified date range and site"
+            }), 404
+
+        # Create DataFrame
+        df = pd.DataFrame(report_data)
+
+        # Create Excel file in memory
+        output = BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df.to_excel(writer, index=False, sheet_name='Monthly Attendance Report')
+
+            # Get workbook and worksheet for formatting
+            workbook = writer.book
+            worksheet = writer.sheets['Monthly Attendance Report']
+
+            # Auto-adjust column widths
+            for idx, column in enumerate(df.columns, 1):
+                if len(df) > 0:
+                    column_length = max(df[column].astype(str).map(len).max(), len(str(column)))
+                else:
+                    column_length = len(str(column))
+                col_letter = worksheet.cell(1, idx).column_letter
+                worksheet.column_dimensions[col_letter].width = min(column_length + 2, 25)
+
+        # Seek to beginning
+        output.seek(0)
+
+        # Generate filename
+        start_date_obj = datetime.strptime(start_date, '%Y-%m-%d')
+        end_date_obj = datetime.strptime(end_date, '%Y-%m-%d')
+        filename = f"monthly_attendance_report_{effective_site_id}_{start_date_obj.strftime('%Y%m%d')}_to_{end_date_obj.strftime('%Y%m%d')}.xlsx"
+
+        logger.info(f"Generated monthly attendance Excel report for site {effective_site_id}, {len(report_data)} employees, date range {start_date} to {end_date}")
+
+        return send_file(
+            output,
+            download_name=filename,
+            as_attachment=True,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+
+    except Exception as e:
+        logger.error(f"Error generating monthly attendance Excel report: {str(e)}")
+        return jsonify({
+            "success": False,
+            "message": f"Error generating report: {str(e)}"
+        }), 500
+
 @attendance_bp.route("/debug-columns", methods=["POST"])
 @token_required
 def debug_columns(current_user):
@@ -1357,18 +1465,18 @@ def debug_columns(current_user):
     try:
         if 'file' not in request.files:
             return jsonify({"success": False, "message": "No file uploaded"}), 400
-        
+
         file = request.files['file']
         if not file or file.filename == '':
             return jsonify({"success": False, "message": "No file selected"}), 400
-        
+
         # Read Excel file
         file_data = BytesIO(file.read())
         df = safe_read_excel(file_data, dtype=str)
-        
+
         # Clean up column names
         df.columns = df.columns.str.strip()
-        
+
         # Debug info
         debug_info = {
             "total_columns": len(df.columns),
@@ -1377,7 +1485,7 @@ def debug_columns(current_user):
             "non_date_columns": [],
             "column_analysis": {}
         }
-        
+
         for col in df.columns:
             is_date_col = is_date(col)
             debug_info["column_analysis"][col] = {
@@ -1385,7 +1493,7 @@ def debug_columns(current_user):
                 "column_str": str(col).strip(),
                 "column_type": type(col).__name__
             }
-            
+
             if is_date_col:
                 debug_info["date_columns"].append(col)
                 # Try to parse it
@@ -1397,12 +1505,12 @@ def debug_columns(current_user):
                 }
             else:
                 debug_info["non_date_columns"].append(col)
-        
+
         return jsonify({
             "success": True,
             "debug_info": debug_info
         }), 200
-        
+
     except Exception as e:
         return jsonify({
             "success": False,
