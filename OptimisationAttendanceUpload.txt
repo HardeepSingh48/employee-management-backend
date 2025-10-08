@@ -1,0 +1,287 @@
+Prompt:
+
+# Performance Optimization Implementation - Attendance Routes
+
+## Context
+I need to optimize two slow API routes in my Flask attendance management system:
+1. `/attendance/template` - Takes 22.43 seconds (should be 3-5s)
+2. `/attendance/bulk-mark-excel` - Takes 23.79 seconds (should be 5-8s)
+
+## Critical Requirements
+⚠️ **IMPORTANT**: All existing validations and functionality MUST remain intact:
+- Role-based access control (supervisor/admin/employee)
+- Site-based filtering through salary code relationships
+- Employee validation (existence, authorization, site membership)
+- Date validation (format, range, month matching)
+- Attendance status validation
+- Duplicate detection
+- File structure validation
+- All error handling and error messages
+- Data integrity checks
+- Overtime calculations
+- Update vs insert logic
+
+## Files to Modify
+
+### 1. `models/attendance.py`
+**Add database indexes** (CRITICAL for performance):
+```python
+class Attendance(db.Model):
+    __tablename__ = "attendance"
+    
+    # ... existing fields remain unchanged ...
+    
+    # ADD THIS at the end of the class, before __repr__
+    __table_args__ = (
+        db.Index('idx_employee_date', 'employee_id', 'attendance_date'),
+        db.Index('idx_attendance_date', 'attendance_date'),
+        db.Index('idx_employee_id', 'employee_id'),
+        db.Index('idx_date_range', 'attendance_date', 'employee_id'),
+    )
+```
+
+### 2. `models/employee.py`
+**Add index for salary code joins**:
+```python
+# Add to Employee model's __table_args__
+db.Index('idx_employee_salary_code', 'salary_code'),
+```
+
+### 3. `models/wage_master.py`
+**Add index for site joins**:
+```python
+# Add to WageMaster model's __table_args__
+db.Index('idx_wage_master_site', 'site_name'),
+```
+
+### 4. `requirements.txt`
+**Add these packages**:
+```
+xlsxwriter==3.1.9
+```
+
+### 5. `routes/attendance.py`
+**Replace ONLY these two route functions** while preserving all validations:
+
+#### A. `/attendance/template` Route
+Replace the `download_attendance_template` function with optimized version.
+
+**Key optimizations to implement**:
+- Use `db.session.query()` with specific columns instead of loading full Employee objects
+- Use `yield_per(1000)` for memory-efficient iteration
+- Pre-calculate all dates and Sunday flags in one loop
+- Use list comprehension for DataFrame creation
+- Switch to `xlsxwriter` engine with `constant_memory=True`
+- Set fixed column widths instead of calculating from data
+- Add caching headers
+
+**Validations that MUST remain**:
+- Role check: `['supervisor', 'admin', 'superadmin']`
+- Site filtering for supervisors through WageMaster → Site joins
+- Employee loading based on site_id parameter
+- Date range generation for correct month/year
+- Sunday detection (weekday == 6)
+- Empty DataFrame handling with proper columns
+
+#### B. `/attendance/bulk-mark-excel` Route
+Replace the `bulk_mark_attendance_excel` function with optimized version.
+
+**Key optimizations to implement**:
+- Load only `Employee.employee_id` column for validation
+- Remove empty rows immediately after reading Excel
+- Parse all dates once into a dictionary
+- Batch load existing attendance with minimal columns
+- Use vectorized pandas operations where possible
+- Pre-calculate overtime distribution
+- Use `bulk_insert_mappings()` and `bulk_update_mappings()`
+- Single commit at the end instead of incremental commits
+
+**Critical validations that MUST remain**:
+1. **Authorization checks**:
+   - Role validation: supervisor/admin only
+   - Supervisor can only access their site's employees
+   - Admin respects site_id parameter
+
+2. **File validations**:
+   - File upload check
+   - File format validation
+   - Month/year parameter validation
+   - Required column detection (Employee ID, Employee Name)
+   - Maximum file size check
+
+3. **Structure validations** (all from `validate_excel_structure`):
+   - Required columns present
+   - Date column format validation
+   - Empty file check
+
+4. **Employee validations** (all from `validate_employee_data`):
+   - Empty employee IDs detection
+   - Missing employees in database
+   - Unauthorized employees for supervisor's site
+   - Duplicate employee IDs in file
+
+5. **Data validations** (all from `validate_attendance_data`):
+   - Invalid date formats
+   - Dates outside requested month/year
+   - Invalid attendance status values
+   - Must show all validation errors to user before processing
+
+6. **Business logic**:
+   - Overtime calculation (monthly overtime on first working day)
+   - Status-based hours calculation (Half Day=4h, Absent=0h, Present=8h)
+   - Weekend detection
+   - Holiday detection
+   - Update existing vs insert new logic
+
+7. **Error handling**:
+   - All try-catch blocks maintained
+   - Rollback on errors
+   - Detailed error messages
+   - Validation error structure returned to frontend
+
+8. **Response format**:
+   - Must match existing response structure
+   - Include validation_errors object
+   - Include validation_summary
+   - Include performance metrics
+   - Include results breakdown
+
+## Implementation Steps
+
+### Step 1: Database Migration
+```bash
+# Create migration for indexes
+flask db migrate -m "Add performance indexes to attendance tables"
+flask db upgrade
+```
+
+### Step 2: Update Models
+- Add `__table_args__` with indexes to Attendance, Employee, WageMaster models
+- Keep all existing fields and methods unchanged
+
+### Step 3: Install Dependencies
+```bash
+pip install xlsxwriter==3.1.9
+```
+
+### Step 4: Update Routes
+- Replace the two route functions in `routes/attendance.py`
+- **DO NOT modify** any helper functions: `batch_load_employees`, `batch_load_existing_attendance`, `safe_bulk_insert`, `safe_read_excel`
+- **DO NOT modify** validation functions in `utils/file_validators.py`
+- **DO NOT modify** any other routes in the file
+
+### Step 5: Testing Checklist
+After implementation, verify:
+
+#### Template Route Tests:
+- [ ] Supervisor can download template for their site only
+- [ ] Admin can download template for any site
+- [ ] Template includes all employees from specified site
+- [ ] Date columns match requested month/year
+- [ ] Sundays are pre-filled with "OFF"
+- [ ] Employee ID and Name columns present
+- [ ] Overtime column present
+- [ ] Empty template works when no employees
+- [ ] File downloads successfully
+- [ ] Large employee lists (1000+) work efficiently
+
+#### Bulk Upload Route Tests:
+- [ ] Supervisor can only upload for their site
+- [ ] Admin can upload for any specified site
+- [ ] File validation rejects invalid files
+- [ ] Missing required columns detected
+- [ ] Invalid employee IDs rejected
+- [ ] Employees not in site rejected (supervisor)
+- [ ] Invalid date formats rejected
+- [ ] Dates outside month/year rejected
+- [ ] Invalid attendance statuses rejected
+- [ ] Duplicate employees in file detected
+- [ ] Empty employee IDs detected
+- [ ] All validation errors shown before processing
+- [ ] Valid data processes successfully
+- [ ] Existing attendance updates correctly
+- [ ] New attendance creates correctly
+- [ ] Overtime distributes to first working day only
+- [ ] Hours calculated correctly per status
+- [ ] Transaction rollback on error
+- [ ] Performance under 8 seconds for 1000+ records
+
+#### Validation Preservation Tests:
+- [ ] All validation functions still called
+- [ ] Validation errors return proper structure
+- [ ] No data processed if validations fail
+- [ ] Error messages match previous format
+- [ ] Warning messages preserved
+
+#### Data Integrity Tests:
+- [ ] No duplicate attendance records created
+- [ ] Existing records update, not duplicate
+- [ ] marked_by and created_by set correctly
+- [ ] Timestamps set correctly
+- [ ] is_weekend calculated correctly
+- [ ] Attendance status values remain valid
+
+## Expected Performance Improvements
+- **Template generation**: 22.43s → 3-5s (80% improvement)
+- **Bulk upload**: 23.79s → 5-8s (70% improvement)
+
+## Code Quality Requirements
+- Maintain existing code style and formatting
+- Keep all existing comments
+- Add comments for optimized sections
+- Use same variable naming conventions
+- Preserve logging statements
+- Keep same error message formats
+
+## What NOT to Change
+❌ Do not modify:
+- Authentication/authorization logic
+- Validation helper functions
+- Other routes in the blueprint
+- Database models (except adding indexes)
+- Service layer functions
+- Error response formats
+- API contracts/response structures
+- Frontend-facing interfaces
+
+## Verification Command
+After implementation, test with:
+```bash
+# Test template download
+curl -X GET "http://localhost:5000/attendance/template?month=12&year=2025&site_id=RANCHI-JH" \
+  -H "Authorization: Bearer <token>" \
+  --output template.xlsx
+
+# Test bulk upload
+curl -X POST "http://localhost:5000/attendance/bulk-mark-excel" \
+  -H "Authorization: Bearer <token>" \
+  -F "file=@template.xlsx" \
+  -F "month=12" \
+  -F "year=2025" \
+  -F "site_id=RANCHI-JH"
+```
+
+## Success Criteria
+✅ Implementation is successful when:
+1. All existing tests pass
+2. Template downloads in <5 seconds
+3. Bulk upload processes in <8 seconds
+4. All validations still work
+5. No data corruption
+6. Same API responses
+7. Same error handling behavior
+8. All role-based restrictions preserved
+9. Transaction integrity maintained
+10. Backward compatibility maintained
+
+## Rollback Plan
+If issues occur:
+1. Revert route changes
+2. Keep database indexes (they don't break anything)
+3. Test with original code
+4. Review error logs
+5. Fix and re-deploy
+
+---
+
+**Start implementation with database indexes first, then routes. Test after each step.**
