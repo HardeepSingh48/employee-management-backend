@@ -14,6 +14,7 @@ import calendar
 import time
 import uuid
 from utils.attendance_helpers import round_to_half, normalize_attendance_value, is_date, parse_date_from_column
+from utils.file_validators import validate_excel_file, validate_excel_structure, validate_employee_data, validate_attendance_data
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -1000,132 +1001,217 @@ def download_attendance_template(current_user):
 @attendance_bp.route("/bulk-mark-excel", methods=["POST"])
 @token_required
 def bulk_mark_attendance_excel(current_user):
-    """Optimized bulk mark attendance via Excel file"""
+    """Enhanced bulk mark attendance with comprehensive error handling"""
     start_time = time.time()
-    
+
+    # Initialize error tracking
+    validation_errors = {
+        'file_errors': [],
+        'structure_errors': [],
+        'employee_errors': [],
+        'data_errors': [],
+        'warnings': []
+    }
+
     try:
-        # Authorization and file validation (same as original)
+        # PHASE 1: Request Validation
         if current_user.role not in ['supervisor', 'admin']:
             return jsonify({"success": False, "message": "Unauthorized"}), 403
-        
+
         if 'file' not in request.files:
             return jsonify({"success": False, "message": "No file uploaded"}), 400
-        
+
         file = request.files['file']
         month = request.form.get('month')
         year = request.form.get('year')
         site_id_param = request.form.get('site_id')
-        
+
         if not file or file.filename == '':
             return jsonify({"success": False, "message": "No file selected"}), 400
-            
+
         if not month or not year:
             return jsonify({"success": False, "message": "Month and year are required"}), 400
-        
+
         try:
             month = int(month)
             year = int(year)
-        except ValueError:
-            return jsonify({"success": False, "message": "Invalid month or year format"}), 400
-        
-        # File validation
-        allowed_extensions = {'.xlsx', '.xls'}
-        file_ext = os.path.splitext(file.filename)[1].lower()
-        if file_ext not in allowed_extensions:
-            return jsonify({"success": False, "message": "Invalid file type. Please upload an Excel file (.xlsx or .xls)"}), 400
-        
+            if month < 1 or month > 12:
+                raise ValueError("Month must be between 1 and 12")
+        except ValueError as e:
+            return jsonify({"success": False, "message": f"Invalid month or year: {str(e)}"}), 400
+
+        # PHASE 2: File Validation
+        is_valid_file, file_errors = validate_excel_file(file, max_size_mb=10)
+        if not is_valid_file:
+            validation_errors['file_errors'] = file_errors
+            return jsonify({
+                "success": False,
+                "message": "File validation failed",
+                "validation_errors": {
+                    **validation_errors,
+                    "empty_employee_ids": employee_validation.get('empty_employee_ids', [])
+                }
+            }), 400
+
         # Read Excel file
         file_data = BytesIO(file.read())
-        
+
         try:
-            df = safe_read_excel(file_data)
+            df = safe_read_excel(file_data, dtype=str)
         except Exception as e:
-            return jsonify({"success": False, "message": f"Error reading Excel file: {str(e)}"}), 400
-        
-        # Clean column names
-        df.columns = df.columns.astype(str).str.strip()
-        
-        # Find required columns (same as original)
-        employee_id_col = None
-        for col in df.columns:
-            if col.lower().replace(' ', '').replace('_', '') in ['employeeid', 'empid', 'id']:
-                employee_id_col = col
-                break
-        
-        if not employee_id_col:
+            validation_errors['file_errors'].append(f"Error reading Excel file: {str(e)}")
             return jsonify({
-                "success": False, 
-                "message": "Employee ID column not found. Expected column names: 'Employee ID', 'Emp ID', or 'ID'"
+                "success": False,
+                "message": "Failed to read Excel file",
+                "validation_errors": validation_errors
             }), 400
-        
+
+        # PHASE 3: Structure Validation
+        is_valid_structure, structure_errors, structure_warnings = validate_excel_structure(df)
+        validation_errors['structure_errors'] = structure_errors
+        validation_errors['warnings'].extend(structure_warnings)
+
+        if not is_valid_structure:
+            return jsonify({
+                "success": False,
+                "message": "Excel file structure validation failed",
+                "validation_errors": validation_errors
+            }), 400
+
+        # Find columns
+        df.columns = df.columns.astype(str).str.strip()
+        employee_id_col = None
+        employee_name_col = None
+
+        for col in df.columns:
+            col_normalized = col.lower().replace(' ', '').replace('_', '')
+            if col_normalized in ['employeeid', 'empid', 'id']:
+                employee_id_col = col
+            if col_normalized in ['employeename', 'name', 'empname']:
+                employee_name_col = col
+
         # Clean employee IDs
         df[employee_id_col] = (
             df[employee_id_col]
             .astype(str)
-            .str.strip()                # remove spaces
-            .str.replace('.0', '', regex=False)  # remove Excel float .0
-            .str.replace(r'\.0$', '', regex=True) # extra safeguard
+            .str.strip()
+            .str.replace('.0', '', regex=False)
+            .str.replace(r'\.0$', '', regex=True)
         )
-        
-        # Find employee name column
-        employee_name_col = None
-        for col in df.columns:
-            if col.lower().replace(' ', '').replace('_', '') in ['employeename', 'name', 'empname']:
-                employee_name_col = col
-                break
-        
-        if not employee_name_col:
-            return jsonify({
-                "success": False, 
-                "message": "Employee Name column not found. Expected column names: 'Employee Name', 'Name', or 'Emp Name'"
-            }), 400
-        
+
         # Find date columns
         date_columns = []
         for col in df.columns:
-            if col not in [employee_id_col, employee_name_col, 'Skill Level'] and is_date(col):
+            if col not in [employee_id_col, employee_name_col, 'Skill Level', 'Overtime'] and is_date(col):
                 date_columns.append(col)
-        
-        if not date_columns:
-            return jsonify({
-                "success": False,
-                "message": "No valid date columns found. Expected format: dd/mm/yyyy, dd-mm-yyyy, or datetime objects"
-            }), 400
-        
-        # OPTIMIZATION STARTS HERE
-        
-        # Step 1: Extract all unique employee IDs from file
+
+        # PHASE 4: Load Employees from Database
         employee_ids_in_file = df[employee_id_col].dropna().astype(str).str.strip().unique()
         employee_ids_in_file = [eid for eid in employee_ids_in_file if eid and eid != 'nan']
-        
-        # Step 2: Batch load all employees (1 query instead of N queries)
-        logger.info(f"Excel IDs (first 10): {employee_ids_in_file[:10]}")
 
-        try:
-            effective_site_id = current_user.site_id
-            if current_user.role == 'admin' and site_id_param:
-                effective_site_id = site_id_param
-            employee_dict = batch_load_employees(
-                employee_ids_in_file,
-                effective_site_id,
-                current_user.role
-            )
-            logger.info(f"DB IDs loaded (first 10): {list(employee_dict.keys())[:10]}")
-        except Exception as e:
-            logger.error(f"❌ Error loading employees from DB: {e}")
-            return jsonify({"error": "Failed to load employees from DB"}), 500
-
-        logger.info(f"Loading {len(employee_ids_in_file)} employees in batch...")
         effective_site_id = current_user.site_id
         if current_user.role == 'admin' and site_id_param:
             effective_site_id = site_id_param
+
         employee_dict = batch_load_employees(
-            employee_ids_in_file, 
-            effective_site_id, 
+            employee_ids_in_file,
+            effective_site_id,
             current_user.role
         )
-        
-        # Step 3: Parse all dates to determine date range
+
+        # PHASE 5: Employee Validation
+        employee_validation = validate_employee_data(
+            df,
+            employee_id_col,
+            employee_dict,
+            current_user.role,
+            effective_site_id
+        )
+
+        # Check for critical employee errors
+        if employee_validation['empty_employee_ids']:
+            validation_errors['employee_errors'].extend([
+                f"Row {err['row']}: {err['error']}"
+                for err in employee_validation['empty_employee_ids']
+            ])
+
+        if employee_validation['missing_employees']:
+            validation_errors['employee_errors'].extend([
+                f"Row {err['row']}: {err['error']}"
+                for err in employee_validation['missing_employees']
+            ])
+
+        if employee_validation['unauthorized_employees']:
+            validation_errors['employee_errors'].extend([
+                f"Row {err['row']}: {err['error']}"
+                for err in employee_validation['unauthorized_employees']
+            ])
+
+        if employee_validation['duplicate_employees']:
+            validation_errors['employee_errors'].append(
+                f"Duplicate Employee IDs found in file: {', '.join(employee_validation['duplicate_employees'])}"
+            )
+
+        # PHASE 6: Attendance Data Validation
+        attendance_validation = validate_attendance_data(df, date_columns, month, year)
+
+        if attendance_validation['invalid_dates']:
+            validation_errors['data_errors'].extend([
+                f"Column '{err['column']}': {err['error']}"
+                for err in attendance_validation['invalid_dates']
+            ])
+
+        # Month mismatches are now critical errors, not warnings
+        if attendance_validation['out_of_range_dates']:
+            validation_errors['data_errors'].extend([
+                f"Incorrect format: {err['error']}. Please add attendance for the selected month ({month}/{year}) with correct format."
+                for err in attendance_validation['out_of_range_dates']
+            ])
+
+        if attendance_validation['invalid_statuses']:
+            validation_errors['data_errors'].extend([
+                f"Row {err['row']}, Column '{err['column']}': Invalid status '{err['value']}'"
+                for err in attendance_validation['invalid_statuses'][:10]  # Limit to first 10
+            ])
+            if len(attendance_validation['invalid_statuses']) > 10:
+                validation_errors['data_errors'].append(
+                    f"... and {len(attendance_validation['invalid_statuses']) - 10} more invalid status errors"
+                )
+
+        # PHASE 7: Decision - Proceed or Reject
+        # Calculate validation summary
+        total_errors = (
+            len(validation_errors['structure_errors']) +
+            len(validation_errors['employee_errors']) +
+            len(validation_errors['data_errors'])
+        )
+
+        valid_employee_count = len(employee_validation['valid_employees'])
+        invalid_employee_count = (
+            len(employee_validation['missing_employees']) +
+            len(employee_validation['unauthorized_employees'])
+        )
+
+        # Reject if critical errors found
+        if total_errors > 0:
+            return jsonify({
+                "success": False,
+                "message": f"Validation failed with {total_errors} error(s). Please fix errors and try again.",
+                "validation_summary": {
+                    "total_errors": total_errors,
+                    "total_warnings": len(validation_errors['warnings']),
+                    "valid_employees": valid_employee_count,
+                    "invalid_employees": invalid_employee_count,
+                    "total_rows": len(df),
+                    "total_date_columns": len(date_columns)
+                },
+                "validation_errors": validation_errors
+            }), 400
+
+        # PHASE 8: Process Valid Data (existing logic continues here...)
+        logger.info(f"Validation passed. Processing {valid_employee_count} employees...")
+
+        # Parse all dates to determine date range
         all_dates = set()
         for col in date_columns:
             year_from_col, month_from_col, day_from_col = parse_date_from_column(col)
@@ -1135,24 +1221,17 @@ def bulk_mark_attendance_excel(current_user):
                     all_dates.add(attendance_date)
                 except ValueError:
                     continue
-        
-        if not all_dates:
-            return jsonify({
-                "success": False,
-                "message": "No valid dates found in columns"
-            }), 400
-        
-        min_date = min(all_dates)
-        max_date = max(all_dates)
-        
-        # Step 4: Batch load existing attendance (1 query instead of N queries)
-        logger.info(f"Loading existing attendance from {min_date} to {max_date}...")
+
+        min_date = min(all_dates) if all_dates else date.today()
+        max_date = max(all_dates) if all_dates else date.today()
+
+        # Batch load existing attendance
         existing_attendance_dict = batch_load_existing_attendance(
-            list(employee_dict.keys()), 
-            min_date, 
+            list(employee_dict.keys()),
+            min_date,
             max_date
         )
-        
+
         # Initialize results tracking
         results = {
             "processed": 0,
@@ -1163,51 +1242,45 @@ def bulk_mark_attendance_excel(current_user):
             "updated_records": 0,
             "new_records": 0
         }
-        
-        # Step 5: Prepare bulk operations
+
+        # Prepare bulk operations
         new_attendance_records = []
         updated_records = []
-        
-        logger.info(f"Processing {len(df)} employees with {len(date_columns)} date columns...")
-        
+
         # Process each row
         for index, row in df.iterrows():
             try:
                 employee_id = str(row[employee_id_col]).strip()
-                
+
                 # Skip empty rows
                 if pd.isna(row[employee_id_col]) or employee_id in ['nan', ''] or not employee_id:
                     continue
-                
-                # Check if employee exists (O(1) lookup instead of database query)
+
+                # Check if employee exists (O(1) lookup)
                 employee = employee_dict.get(employee_id)
                 if not employee:
-                    results["errors"].append(f"Employee {employee_id} not found or not in your site")
-                    results["failed"] += 1
-                    continue
-                
+                    continue  # Should not happen due to validation
+
                 employee_processed = False
 
-                # Optional: read Overtime column (total monthly overtime shifts)
+                # Optional: read Overtime column
                 monthly_overtime_shifts = 0.0
                 if 'Overtime' in df.columns:
                     try:
                         raw_ot = row.get('Overtime')
                         if pd.notna(raw_ot) and str(raw_ot).strip() != '':
-                            # The overtime column contains total overtime shifts for the entire month
                             monthly_overtime_shifts = float(str(raw_ot).strip())
-                            # Round to nearest 0.5 as overtime shifts are typically in 0.5 increments
                             monthly_overtime_shifts = round(monthly_overtime_shifts * 2) / 2.0
                     except Exception:
                         monthly_overtime_shifts = 0.0
-                
+
                 # Process each date column for this employee
                 first_working_day_processed = False
                 for col in date_columns:
                     try:
                         cell_value = row[col]
 
-                        # FIX: Don't skip empty - mark as Absent
+                        # Don't skip empty - mark as Absent
                         if pd.isna(cell_value) or str(cell_value).strip() == '':
                             attendance_value = 'Absent'
                         else:
@@ -1227,20 +1300,18 @@ def bulk_mark_attendance_excel(current_user):
                             day_overtime = 0.0
                             if monthly_overtime_shifts > 0 and attendance_value not in ['Absent', 'Leave', 'Holiday']:
                                 if not first_working_day_processed:
-                                    # Apply total monthly overtime to first working day
                                     day_overtime = monthly_overtime_shifts
                                     first_working_day_processed = True
                                 else:
-                                    day_overtime = 0.0  # Overtime already applied to first working day
+                                    day_overtime = 0.0
 
-                            # Check if attendance exists (O(1) lookup instead of database query)
+                            # Check if attendance exists
                             existing_key = f"{employee.employee_id}_{attendance_date}"
                             existing = existing_attendance_dict.get(existing_key)
 
                             if existing:
                                 # Mark for update
                                 existing.attendance_status = attendance_value
-                                # Update overtime if provided
                                 if day_overtime > 0:
                                     existing.overtime_shifts = day_overtime
                                 existing.marked_by = current_user.role
@@ -1253,13 +1324,11 @@ def bulk_mark_attendance_excel(current_user):
                                     existing.total_hours_worked = 0.0
                                 else:
                                     existing.total_hours_worked = 8.0
-                                # ADD THIS LINE:
-                                db.session.add(existing)  # Mark for update in session
+                                db.session.add(existing)
                                 updated_records.append(existing)
                                 results["updated_records"] += 1
                             else:
                                 # Prepare for bulk insert
-                                # Calculate total_hours_worked based on status
                                 total_hours_worked = 8.0 if attendance_value not in ['Absent', 'Half Day'] else (4.0 if attendance_value == 'Half Day' else 0.0)
                                 new_record = {
                                     'attendance_id': str(uuid.uuid4()),
@@ -1273,7 +1342,7 @@ def bulk_mark_attendance_excel(current_user):
                                     'total_hours_worked': total_hours_worked,
                                     'is_approved': True,
                                     'is_weekend': attendance_date.weekday() >= 5,
-                                    'is_holiday': False  # You can enhance this with holiday check
+                                    'is_holiday': False
                                 }
                                 new_attendance_records.append(new_record)
                                 results["new_records"] += 1
@@ -1283,49 +1352,55 @@ def bulk_mark_attendance_excel(current_user):
                     except Exception as e:
                         logger.error(f"Error processing column {col} for employee {employee_id}: {str(e)}")
                         results["errors"].append(f"Error processing column {col} for employee {employee_id}: {str(e)}")
-                
+
                 if employee_processed:
                     results["successful"] += 1
                 else:
                     results["skipped_records"] += 1
-                    
+
                 results["processed"] += 1
-                
+
             except Exception as e:
                 results["errors"].append(f"Error processing employee {row.get(employee_id_col, 'Unknown')}: {str(e)}")
                 results["failed"] += 1
                 results["processed"] += 1
-        
-        # Step 6: Execute bulk operations
+
+        # Execute bulk operations
         try:
             # Bulk insert new records
             if new_attendance_records:
                 logger.info(f"Bulk inserting {len(new_attendance_records)} new records...")
                 bulk_results = safe_bulk_insert(new_attendance_records, chunk_size=1000)
                 results["errors"].extend(bulk_results["errors"])
-            
-            # Commit all changes (updates + new records)
+
+            # Commit all changes
             db.session.commit()
-            
+
         except Exception as e:
             db.session.rollback()
             logger.error(f"Bulk operation failed: {str(e)}")
             return jsonify({
                 "success": False,
-                "message": f"Bulk operation failed: {str(e)}"
+                "message": f"Bulk operation failed: {str(e)}",
+                "validation_errors": validation_errors
             }), 500
-        
+
         # Calculate performance metrics
-        end_time = time.time()
-        processing_time = round(end_time - start_time, 2)
-        
+        processing_time = round(time.time() - start_time, 2)
+
         return jsonify({
             "success": True,
-            "message": f"Optimized bulk attendance upload completed in {processing_time}s",
+            "message": f"Bulk attendance upload completed successfully in {processing_time}s",
+            "validation_summary": {
+                "total_warnings": len(validation_errors['warnings']),
+                "valid_employees": valid_employee_count,
+                "total_rows": len(df),
+                "total_date_columns": len(date_columns)
+            },
+            "warnings": validation_errors['warnings'] if validation_errors['warnings'] else None,
             "performance": {
                 "processing_time_seconds": processing_time,
                 "employees_loaded": len(employee_dict),
-                "existing_records_loaded": len(existing_attendance_dict),
                 "date_columns_processed": len(date_columns)
             },
             "results": {
@@ -1334,20 +1409,20 @@ def bulk_mark_attendance_excel(current_user):
                 "updated_records": results["updated_records"],
                 "skipped_records": results["skipped_records"],
                 "successful_employees": results["successful"],
-                "failed_employees": results["failed"],
-                "errors": results["errors"][:10]  # Limit error list for response size
+                "failed_employees": results["failed"]
             }
         }), 200
-        
+
     except Exception as e:
         db.session.rollback()
         import traceback
         error_details = traceback.format_exc()
-        logger.error(f"Error in optimized bulk-mark-excel: {str(e)}")
+        logger.error(f"Error in bulk-mark-excel: {str(e)}")
         logger.error(f"Traceback: {error_details}")
         return jsonify({
             "success": False,
-            "message": f"Error processing file: {str(e)}"
+            "message": f"Unexpected error: {str(e)}",
+            "validation_errors": validation_errors
         }), 500
 
 @attendance_bp.route("/monthly-report-excel", methods=["GET"])
