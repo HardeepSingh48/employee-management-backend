@@ -126,11 +126,9 @@ class AttendanceService:
                     attendance_status = 'Late'
 
             # Adjust total_hours_worked based on status
-            if attendance_status == 'Half Day':
-                total_hours_worked = 4.0
-            elif attendance_status == 'Absent':
+            if attendance_status == 'Absent':
                 total_hours_worked = 0.0
-            # For Present/Late, keep calculated or default 8.0
+            # For Present, keep calculated or default 8.0
 
             if existing_attendance:
                 # UPDATE existing record
@@ -302,10 +300,8 @@ class AttendanceService:
 
             # Single optimized query for summary stats using database aggregation
             summary_result = db.session.query(
-                func.count(case((Attendance.attendance_status.in_(['Present', 'Late']), 1))).label('present_days'),
+                func.count(case((Attendance.attendance_status == 'Present', 1))).label('present_days'),
                 func.count(case((Attendance.attendance_status == 'Absent', 1))).label('absent_days'),
-                func.count(case((Attendance.attendance_status == 'Late', 1))).label('late_days'),
-                func.count(case((Attendance.attendance_status == 'Half Day', 1))).label('half_days'),
                 func.sum(Attendance.overtime_shifts).label('total_overtime_shifts'),
                 func.count(Attendance.attendance_id).label('total_records')
             ).filter(
@@ -324,8 +320,6 @@ class AttendanceService:
             # Extract summary values
             present_days = summary_result.present_days or 0
             absent_days = summary_result.absent_days or 0
-            late_days = summary_result.late_days or 0
-            half_days = summary_result.half_days or 0
             total_overtime_shifts = summary_result.total_overtime_shifts or 0.0
             total_overtime_hours = total_overtime_shifts * 8
 
@@ -354,8 +348,6 @@ class AttendanceService:
                     "month": month,
                     "present_days": present_days,
                     "absent_days": absent_days,
-                    "late_days": late_days,
-                    "half_days": half_days,
                     "total_overtime_shifts": total_overtime_shifts,
                     "total_overtime_hours": total_overtime_hours,
                     "working_days": working_days,
@@ -384,10 +376,8 @@ class AttendanceService:
 
             summary_results = db.session.query(
                 Attendance.employee_id,
-                func.count(case((Attendance.attendance_status.in_(['Present', 'Late']), 1))).label('present_days'),
+                func.count(case((Attendance.attendance_status == 'Present', 1))).label('present_days'),
                 func.count(case((Attendance.attendance_status == 'Absent', 1))).label('absent_days'),
-                func.count(case((Attendance.attendance_status == 'Late', 1))).label('late_days'),
-                func.count(case((Attendance.attendance_status == 'Half Day', 1))).label('half_days'),
                 func.coalesce(func.sum(Attendance.overtime_shifts), 0).label('total_overtime_shifts'),
                 func.count(Attendance.attendance_id).label('total_records')
             ).filter(
@@ -404,8 +394,6 @@ class AttendanceService:
                 attendance_dict[record.employee_id] = {
                     'present_days': record.present_days or 0,
                     'absent_days': record.absent_days or 0,
-                    'late_days': record.late_days or 0,
-                    'half_days': record.half_days or 0,
                     'total_overtime_shifts': float(record.total_overtime_shifts or 0),
                     'total_overtime_hours': float(record.total_overtime_shifts or 0) * 8,
                     'total_records': record.total_records or 0
@@ -417,8 +405,6 @@ class AttendanceService:
                     attendance_dict[emp_id] = {
                         'present_days': 0,
                         'absent_days': 0,
-                        'late_days': 0,
-                        'half_days': 0,
                         'total_overtime_shifts': 0.0,
                         'total_overtime_hours': 0.0,
                         'total_records': 0
@@ -451,8 +437,6 @@ class AttendanceService:
             if isinstance(end_date, str):
                 end_date = datetime.strptime(end_date, '%Y-%m-%d').date()
 
-            # Debug logging
-            # print(f"Monthly Report Service Debug: site_id={site_id}, start_date={start_date}, end_date={end_date}")
 
             # Get all employees in the site, sorted by employee_id
             employees = Employee.query.join(
@@ -490,10 +474,6 @@ class AttendanceService:
                 date_range.append(current_date)
                 current_date += timedelta(days=1)
 
-            # Debug logging
-            # print(f"Date range generated: {len(date_range)} dates from {date_range[0] if date_range else 'None'} to {date_range[-1] if date_range else 'None'}")
-            # print(f"First 5 dates: {[d.strftime('%d/%m/%Y') for d in date_range[:5]]}")
-            # print(f"Last 5 dates: {[d.strftime('%d/%m/%Y') for d in date_range[-5:]]}")
 
             # Prepare report data
             report_data = []
@@ -529,6 +509,8 @@ class AttendanceService:
                         status = 'A'
                     elif status == 'Present':
                         status = 'P'
+                    elif status == 'OFF':
+                        status = 'O'
 
                     employee_row[date_str] = status
 

@@ -138,10 +138,8 @@ class SalaryService:
             # ============================================
             attendance_summary = db.session.query(
                 Attendance.employee_id,
-                func.count(case((Attendance.attendance_status.in_(['Present', 'Late']), 1))).label('present_days'),
+                func.count(case((Attendance.attendance_status == 'Present', 1))).label('present_days'),
                 func.count(case((Attendance.attendance_status == 'Absent', 1))).label('absent_days'),
-                func.count(case((Attendance.attendance_status == 'Late', 1))).label('late_days'),
-                func.count(case((Attendance.attendance_status == 'Half Day', 1))).label('half_days'),
                 func.coalesce(func.sum(Attendance.overtime_shifts), 0).label('total_overtime_shifts')
             ).filter(
                 Attendance.employee_id.in_(employee_ids),
@@ -156,8 +154,6 @@ class SalaryService:
                 record.employee_id: {
                     'present_days': record.present_days or 0,
                     'absent_days': record.absent_days or 0,
-                    'late_days': record.late_days or 0,
-                    'half_days': record.half_days or 0,
                     'total_overtime_shifts': float(record.total_overtime_shifts or 0)
                 }
                 for record in attendance_summary
@@ -189,8 +185,6 @@ class SalaryService:
                 attendance = attendance_dict.get(emp_id, {
                     'present_days': 0,
                     'absent_days': 0,
-                    'late_days': 0,
-                    'half_days': 0,
                     'total_overtime_shifts': 0
                 })
 
@@ -368,10 +362,8 @@ class SalaryService:
             # ============================================
             attendance_summary = db.session.query(
                 Attendance.employee_id,
-                func.count(case((Attendance.attendance_status.in_(['Present', 'Late']), 1))).label('present_days'),
+                func.count(case((Attendance.attendance_status == 'Present', 1))).label('present_days'),
                 func.count(case((Attendance.attendance_status == 'Absent', 1))).label('absent_days'),
-                func.count(case((Attendance.attendance_status == 'Late', 1))).label('late_days'),
-                func.count(case((Attendance.attendance_status == 'Half Day', 1))).label('half_days'),
                 func.coalesce(func.sum(Attendance.overtime_shifts), 0).label('total_overtime_shifts')
             ).filter(
                 Attendance.employee_id.in_(employee_ids),
@@ -386,8 +378,6 @@ class SalaryService:
                 record.employee_id: {
                     'present_days': record.present_days or 0,
                     'absent_days': record.absent_days or 0,
-                    'late_days': record.late_days or 0,
-                    'half_days': record.half_days or 0,
                     'total_overtime_shifts': float(record.total_overtime_shifts or 0)
                 }
                 for record in attendance_summary
@@ -419,8 +409,6 @@ class SalaryService:
                 attendance = attendance_dict.get(emp_id, {
                     'present_days': 0,
                     'absent_days': 0,
-                    'late_days': 0,
-                    'half_days': 0,
                     'total_overtime_shifts': 0
                 })
                 
@@ -841,10 +829,8 @@ class SalaryService:
             # STEP 2: Bulk fetch attendance data (1 query)
             attendance_summary = db.session.query(
                 Attendance.employee_id,
-                func.count(case((Attendance.attendance_status.in_(['Present', 'Late']), 1))).label('present_days'),
+                func.count(case((Attendance.attendance_status == 'Present', 1))).label('present_days'),
                 func.count(case((Attendance.attendance_status == 'Absent', 1))).label('absent_days'),
-                func.count(case((Attendance.attendance_status == 'Late', 1))).label('late_days'),
-                func.count(case((Attendance.attendance_status == 'Half Day', 1))).label('half_days'),
                 func.coalesce(func.sum(Attendance.overtime_shifts), 0).label('total_overtime_shifts')
             ).filter(
                 Attendance.employee_id.in_(employee_ids),
@@ -859,8 +845,6 @@ class SalaryService:
                 record.employee_id: {
                     'present_days': record.present_days or 0,
                     'absent_days': record.absent_days or 0,
-                    'late_days': record.late_days or 0,
-                    'half_days': record.half_days or 0,
                     'total_overtime_shifts': float(record.total_overtime_shifts or 0)
                 }
                 for record in attendance_summary
@@ -886,8 +870,7 @@ class SalaryService:
             for emp_id, emp_info in employee_dict.items():
                 # Get attendance data
                 attendance = attendance_dict.get(emp_id, {
-                    'present_days': 0, 'absent_days': 0, 'late_days': 0,
-                    'half_days': 0, 'total_overtime_shifts': 0
+                    'present_days': 0, 'absent_days': 0, 'total_overtime_shifts': 0
                 })
 
                 # Calculate components
@@ -1030,10 +1013,8 @@ class SalaryService:
             # STEP 2: Bulk fetch attendance data (1 query)
             attendance_summary = db.session.query(
                 Attendance.employee_id,
-                func.count(case((Attendance.attendance_status.in_(['Present', 'Late']), 1))).label('present_days'),
+                func.count(case((Attendance.attendance_status == 'Present', 1))).label('present_days'),
                 func.count(case((Attendance.attendance_status == 'Absent', 1))).label('absent_days'),
-                func.count(case((Attendance.attendance_status == 'Late', 1))).label('late_days'),
-                func.count(case((Attendance.attendance_status == 'Half Day', 1))).label('half_days'),
                 func.coalesce(func.sum(Attendance.overtime_shifts), 0).label('total_overtime_shifts')
             ).filter(
                 Attendance.employee_id.in_(employee_ids),
@@ -1048,8 +1029,6 @@ class SalaryService:
                 record.employee_id: {
                     'present_days': record.present_days or 0,
                     'absent_days': record.absent_days or 0,
-                    'late_days': record.late_days or 0,
-                    'half_days': record.half_days or 0,
                     'total_overtime_shifts': float(record.total_overtime_shifts or 0)
                 }
                 for record in attendance_summary
@@ -1075,8 +1054,7 @@ class SalaryService:
             for emp_id, emp_info in employee_dict.items():
                 # Get attendance data
                 attendance = attendance_dict.get(emp_id, {
-                    'present_days': 0, 'absent_days': 0, 'late_days': 0,
-                    'half_days': 0, 'total_overtime_shifts': 0
+                    'present_days': 0, 'absent_days': 0, 'total_overtime_shifts': 0
                 })
 
                 # Calculate basic salary components (same as generate_monthly_salary_data)

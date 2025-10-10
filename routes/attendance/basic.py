@@ -22,7 +22,7 @@ def mark_attendance(current_user):
     {
         "employee_id": "EMP001",
         "attendance_date": "2024-01-15",  # Optional, defaults to today
-        "attendance_status": "Present",   # Present, Absent, Late, Half Day
+        "attendance_status": "Present",   # Present, Absent
         "check_in_time": "2024-01-15T09:00:00",  # Optional
         "check_out_time": "2024-01-15T17:00:00", # Optional
         "overtime_hours": 2.0,            # Optional

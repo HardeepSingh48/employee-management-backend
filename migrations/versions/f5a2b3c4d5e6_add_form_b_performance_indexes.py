@@ -24,15 +24,15 @@ def upgrade():
     with op.batch_alter_table('employees', schema=None) as batch_op:
         batch_op.create_index('idx_employee_salary_code', ['salary_code'], unique=False)
 
-    # Index for wage_master salary_code lookups (used in bulk wage queries)
-    with op.batch_alter_table('wage_master', schema=None) as batch_op:
+    # Index for wage_masters salary_code lookups (used in bulk wage queries)
+    with op.batch_alter_table('wage_masters', schema=None) as batch_op:
         batch_op.create_index('idx_wage_master_salary_code', ['salary_code'], unique=False)
         batch_op.create_index('idx_wage_master_site_name', ['site_name'], unique=False)
 
     # Index for deductions bulk queries (employee_id filtering)
     with op.batch_alter_table('deductions', schema=None) as batch_op:
         batch_op.create_index('idx_deduction_employee_id', ['employee_id'], unique=False)
-        batch_op.create_index('idx_deduction_employee_active', ['employee_id', 'start_date', 'end_date'], unique=False)
+        batch_op.create_index('idx_deduction_employee_active', ['employee_id', 'start_month'], unique=False)
 
     # Composite index for attendance bulk queries (already exists but ensure it's optimized)
     with op.batch_alter_table('attendance', schema=None) as batch_op:
@@ -48,7 +48,7 @@ def downgrade():
         batch_op.drop_index('idx_deduction_employee_active')
         batch_op.drop_index('idx_deduction_employee_id')
 
-    with op.batch_alter_table('wage_master', schema=None) as batch_op:
+    with op.batch_alter_table('wage_masters', schema=None) as batch_op:
         batch_op.drop_index('idx_wage_master_site_name')
         batch_op.drop_index('idx_wage_master_salary_code')
 

@@ -318,7 +318,7 @@ def get_dashboard_stats(current_user):
                 'working_days': working_days,
                 'present_days': attendance_summary.get('data', {}).get('present_days', 0) if attendance_summary.get('success') else 0,
                 'absent_days': attendance_summary.get('data', {}).get('absent_days', 0) if attendance_summary.get('success') else 0,
-                'late_days': attendance_summary.get('data', {}).get('late_days', 0) if attendance_summary.get('success') else 0,
+                'late_days': 0,  # Late days are now counted as present days
                 'attendance_percentage': attendance_summary.get('data', {}).get('attendance_percentage', 0) if attendance_summary.get('success') else 0
             }
         }

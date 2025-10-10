@@ -139,7 +139,7 @@ def mark_attendance(current_user):
     {
         "employee_id": "EMP001",
         "attendance_date": "2024-01-15",  # Optional, defaults to today
-        "attendance_status": "Present",   # Present, Absent, Late, Half Day
+        "attendance_status": "Present",   # Present, Absent
         "check_in_time": "2024-01-15T09:00:00",  # Optional
         "check_out_time": "2024-01-15T17:00:00", # Optional
         "overtime_hours": 2.0,            # Optional
@@ -1441,8 +1441,6 @@ def generate_monthly_attendance_report_excel(current_user):
         end_date = request.args.get('end_date')
         site_id = request.args.get('site_id')
 
-        # Debug logging
-        # logger.info(f"Monthly Report Excel Debug: start_date={start_date}, end_date={end_date}, site_id={site_id}")
 
         # Validate required parameters
         if not start_date or not end_date:

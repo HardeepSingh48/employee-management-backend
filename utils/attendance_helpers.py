@@ -162,16 +162,9 @@ Attendance utility functions for processing and validation
 STATUS_MAP = {
     'P': 'Present',
     'A': 'Absent',
-    'L': 'Late',
-    'HD': 'Half Day',
-    'H': 'Holiday',
-    'LV': 'Leave',
+    'O': 'OFF',
     'Present': 'Present',
     'Absent': 'Absent',
-    'Late': 'Late',
-    'Half Day': 'Half Day',
-    'Holiday': 'Holiday',
-    'Leave': 'Leave',
     'OFF': 'OFF'
 }
 
@@ -185,24 +178,16 @@ def normalize_attendance_value(value):
     """Normalize attendance value and return the mapped status"""
     if not value or pd.isna(value):
         return None
-    
+
     # Convert to string and clean up
     v = str(value).strip().upper()
-    
+
     # Handle common variations
     if v in ['P', 'PRESENT']:
         return 'Present'
     elif v in ['A', 'ABSENT']:
         return 'Absent'
-    elif v in ['L', 'LATE']:
-        return 'Late'
-    elif v in ['HD', 'H', 'HALF DAY', 'HALFDAY']:
-        return 'Half Day'
-    elif v in ['HOL', 'HOLIDAY']:
-        return 'Holiday'
-    elif v in ['LV', 'LEAVE']:
-        return 'Leave'
-    elif v in ['OFF', 'O']:  # Added OFF handling
+    elif v in ['O', 'OFF']:
         return 'OFF'
     else:
         # Try original mapping as fallback

@@ -1281,7 +1281,7 @@ def calculate_bonus(current_user):
         ).filter(
             Attendance.employee_id.in_(employee_ids),
             Attendance.attendance_date.between(start_date, end_date),
-            Attendance.attendance_status.in_(['Present', 'Late'])  # Only count Present and Late as present days
+            Attendance.attendance_status == 'Present'  # Only count Present as present days
         ).group_by(
             Attendance.employee_id,
             func.extract('year', Attendance.attendance_date),
