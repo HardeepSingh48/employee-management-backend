@@ -488,8 +488,8 @@ def get_form_d_data():
 
             wage_master = wage_master_dict.get(employee.salary_code)
 
-            # Get total monthly wages
-            total_monthly_wages = salary_data.get('Total Earnings', 0)
+            # Get monthly basic wage (not total earnings)
+            total_monthly_wages = salary_data.get('Basic', 0)
 
             # Check if employee is covered under ESIC (wage ceiling)
             if total_monthly_wages > ESIC_WAGE_CEILING:
@@ -501,8 +501,19 @@ def get_form_d_data():
             # Calculate IP contribution (0.75% of total monthly wages, rounded up)
             ip_contribution = max(1, round(total_monthly_wages * 0.0075, 0))  # ROUNDUP equivalent
 
-            # Generate insurance number (for demo, using employee ID)
-            insurance_no = f"ESIC{str(employee.employee_id).zfill(6)}"
+            # Fetch insurance number from employee's stored ESIC number
+            try:
+                if employee.esic_number and employee.esic_number.strip():
+                    insurance_no = employee.esic_number.strip()
+                else:
+                    insurance_no = "Null"
+            except AttributeError:
+                # Handle case where esic_number field doesn't exist or is None
+                insurance_no = "Null"
+            except Exception as e:
+                # Handle any other potential errors gracefully
+                print(f"[WARNING] Error fetching ESIC number for employee {employee.employee_id}: {str(e)}")
+                insurance_no = "Null"
 
             form_d_row = {
                 "slNo": idx,

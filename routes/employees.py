@@ -594,6 +594,7 @@ def get_employee(employee_id):
                 "emergency_contact_name": employee.emergency_contact_name,
                 "emergency_contact_phone": employee.emergency_contact_phone,
                 "emergency_contact_relationship": employee.emergency_contact_relationship,
+                "employment_type": employee.employment_type,
                 "esic_number": employee.esic_number,
                 "experience_duration": employee.experience_duration,
                 "gender": employee.gender,
@@ -659,14 +660,65 @@ def update_employee(employee_id):
 
         payload = request.get_json() if request.is_json else request.form.to_dict()
 
-        # Allow updating selected fields
-        allowed_fields = [
-            "first_name", "last_name", "email", "phone_number",
-            "department_id", "designation", "employment_status"
+        # Allow updating comprehensive employee fields
+        employee_fields = [
+            "first_name", "last_name", "father_name", "address", "adhar_number",
+            "marital_status", "date_of_birth", "email", "phone_number", "gender",
+            "nationality", "blood_group", "alternate_contact_number", "pan_card_number",
+            "voter_id_driving_license", "uan", "esic_number", "hire_date",
+            "employment_type", "designation", "work_location", "reporting_manager",
+            "salary_code", "skill_category", "pf_applicability", "esic_applicability",
+            "professional_tax_applicability", "salary_advance_loan", "highest_qualification",
+            "year_of_passing", "additional_certifications", "experience_duration",
+            "emergency_contact_name", "emergency_contact_relationship", "emergency_contact_phone",
+            "department_id", "employment_status"
         ]
-        for field in allowed_fields:
+
+        # Handle boolean fields that come as strings
+        boolean_fields = ["pf_applicability", "esic_applicability", "professional_tax_applicability"]
+        date_fields = ["date_of_birth", "hire_date"]
+
+        for field in employee_fields:
             if field in payload and payload[field] is not None:
-                setattr(emp, field, payload[field])
+                value = payload[field]
+
+                # Convert boolean strings to actual booleans
+                if field in boolean_fields:
+                    if isinstance(value, str):
+                        value = value.lower() in ['true', '1', 'yes', 'y']
+                    elif isinstance(value, bool):
+                        pass  # Already boolean
+                    else:
+                        value = bool(value)
+
+                # Convert date strings to date objects
+                elif field in date_fields and isinstance(value, str):
+                    try:
+                        from datetime import datetime
+                        value = datetime.fromisoformat(value).date()
+                    except:
+                        # If date parsing fails, skip this field
+                        continue
+
+                setattr(emp, field, value)
+
+        # Update account details if provided
+        account = AccountDetails.query.filter_by(emp_id=employee_id).first()
+        if not account:
+            # Create account details if they don't exist
+            account = AccountDetails(emp_id=employee_id)
+            db.session.add(account)
+
+        account_fields = {
+            "bank_account_number": "account_number",
+            "bank_name": "bank_name",
+            "ifsc_code": "ifsc_code",
+            "branch_name": "branch_name"
+        }
+
+        for payload_field, db_field in account_fields.items():
+            if payload_field in payload and payload[payload_field] is not None:
+                setattr(account, db_field, payload[payload_field])
 
         db.session.commit()
 
