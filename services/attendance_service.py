@@ -451,6 +451,9 @@ class AttendanceService:
             if isinstance(end_date, str):
                 end_date = datetime.strptime(end_date, '%Y-%m-%d').date()
 
+            # Debug logging
+            # print(f"Monthly Report Service Debug: site_id={site_id}, start_date={start_date}, end_date={end_date}")
+
             # Get all employees in the site, sorted by employee_id
             employees = Employee.query.join(
                 WageMaster, Employee.salary_code == WageMaster.salary_code
@@ -487,6 +490,11 @@ class AttendanceService:
                 date_range.append(current_date)
                 current_date += timedelta(days=1)
 
+            # Debug logging
+            # print(f"Date range generated: {len(date_range)} dates from {date_range[0] if date_range else 'None'} to {date_range[-1] if date_range else 'None'}")
+            # print(f"First 5 dates: {[d.strftime('%d/%m/%Y') for d in date_range[:5]]}")
+            # print(f"Last 5 dates: {[d.strftime('%d/%m/%Y') for d in date_range[-5:]]}")
+
             # Prepare report data
             report_data = []
             for employee in employees:
@@ -515,6 +523,12 @@ class AttendanceService:
                     else:
                         status = 'Absent'
                         overtime = 0.0
+
+                    # Map full status names to single letters
+                    if status == 'Absent':
+                        status = 'A'
+                    elif status == 'Present':
+                        status = 'P'
 
                     employee_row[date_str] = status
 

@@ -1441,6 +1441,9 @@ def generate_monthly_attendance_report_excel(current_user):
         end_date = request.args.get('end_date')
         site_id = request.args.get('site_id')
 
+        # Debug logging
+        # logger.info(f"Monthly Report Excel Debug: start_date={start_date}, end_date={end_date}, site_id={site_id}")
+
         # Validate required parameters
         if not start_date or not end_date:
             return jsonify({
