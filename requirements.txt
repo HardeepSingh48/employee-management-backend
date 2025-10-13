@@ -37,6 +37,9 @@ MarkupSafe==2.1.3
 itsdangerous==2.1.2
 click==8.1.7
 
+# Performance monitoring (optional - for bulk operations)
+psutil==5.9.6
+
 # Additional dependencies for server compatibility
 fonttools==4.43.1
 Pillow==10.0.1

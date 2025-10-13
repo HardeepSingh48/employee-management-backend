@@ -1402,8 +1402,20 @@ def bulk_mark_attendance_excel(current_user):
             "new_records": 0
         }
 
-        # OPTIMIZED: Use parallel processing for large datasets
-        if len(employee_validation['valid_employees']) > 100:
+        # OPTIMIZED: Smart parallel processing decision based on operation type
+        total_existing_records = len(existing_attendance_dict)
+        total_possible_records = len(employee_validation['valid_employees']) * len(date_columns)
+        update_percentage = total_existing_records / max(1, total_possible_records)
+
+        # Use parallel processing for:
+        # 1. Large datasets (>100 employees)
+        # 2. High update scenarios (>30% existing records - indicates incremental updates)
+        # 3. Mixed operations with significant updates
+        use_parallel = (len(employee_validation['valid_employees']) > 100 or
+                       update_percentage > 0.3 or
+                       (len(employee_validation['valid_employees']) > 50 and update_percentage > 0.1))
+
+        if use_parallel:
             # Split employees into batches for parallel processing
             batch_size = max(50, len(employee_validation['valid_employees']) // 4)  # 4 workers max
             employee_batches = []
@@ -1577,15 +1589,59 @@ def bulk_mark_attendance_excel(current_user):
 
         monitor.checkpoint("data_processing")
 
-        # Execute bulk operations with optimized chunking
+        # Execute bulk operations with optimized chunking and batch updates
         try:
-            # Bulk insert new records with larger chunks
-            if all_new_records:
-                logger.info(f"Bulk inserting {len(all_new_records)} new records...")
-                bulk_results = safe_bulk_insert(all_new_records, chunk_size=5000)
-                results["errors"].extend(bulk_results["errors"])
+            # Prioritize updates over inserts for better performance on incremental changes
+            total_operations = len(all_new_records) + len(all_updated_records)
 
-            # Commit all changes
+            if total_operations > 1000:  # Large operation - use optimized batching
+                logger.info(f"Large operation detected: {total_operations} total records")
+
+                # Process updates first (more common in incremental updates)
+                if all_updated_records:
+                    logger.info(f"Bulk updating {len(all_updated_records)} existing records...")
+                    update_batch_size = 500  # Smaller batches for updates
+                    for i in range(0, len(all_updated_records), update_batch_size):
+                        batch = all_updated_records[i:i + update_batch_size]
+                        try:
+                            for record in batch:
+                                db.session.add(record)
+                            db.session.flush()
+                            logger.info(f"Updated batch {i//update_batch_size + 1}: {len(batch)} records")
+                            memory_efficient_gc(300)  # More frequent GC for updates
+                        except Exception as batch_error:
+                            db.session.rollback()
+                            logger.error(f"Update batch {i//update_batch_size + 1} failed: {str(batch_error)}")
+                            # Fallback to individual updates
+                            for record in batch:
+                                try:
+                                    db.session.add(record)
+                                    db.session.flush()
+                                except Exception as individual_error:
+                                    db.session.rollback()
+                                    results["errors"].append(f"Failed to update record: {str(individual_error)}")
+
+                # Then process inserts
+                if all_new_records:
+                    logger.info(f"Bulk inserting {len(all_new_records)} new records...")
+                    bulk_results = safe_bulk_insert(all_new_records, chunk_size=5000)
+                    results["errors"].extend(bulk_results["errors"])
+
+            else:  # Small operation - use simpler approach
+                # Process all updates first
+                if all_updated_records:
+                    logger.info(f"Updating {len(all_updated_records)} existing records...")
+                    for record in all_updated_records:
+                        db.session.add(record)
+                    db.session.flush()
+
+                # Then process inserts
+                if all_new_records:
+                    logger.info(f"Inserting {len(all_new_records)} new records...")
+                    bulk_results = safe_bulk_insert(all_new_records, chunk_size=1000)
+                    results["errors"].extend(bulk_results["errors"])
+
+            # Final commit
             db.session.commit()
 
         except Exception as e:
@@ -1616,7 +1672,10 @@ def bulk_mark_attendance_excel(current_user):
                 **performance_summary,
                 "employees_loaded": len(employee_dict),
                 "date_columns_processed": len(date_columns),
-                "parallel_processing": len(employee_validation['valid_employees']) > 100
+                "parallel_processing": use_parallel,
+                "existing_records_found": total_existing_records,
+                "update_percentage": update_percentage * 100,
+                "operation_type": "incremental_update" if update_percentage > 0.5 else "bulk_insert" if update_percentage < 0.1 else "mixed_operation"
             },
             "results": {
                 "total_records": results["new_records"] + results["updated_records"],
