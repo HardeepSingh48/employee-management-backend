@@ -79,13 +79,13 @@ def create_app(register_blueprints: bool = True):
     app.config["MAX_CONTENT_LENGTH"] = MAX_CONTENT_LENGTH
     app.config["SECRET_KEY"] = SECRET_KEY
 
-    # SQLAlchemy Connection Pooling Configuration for Performance
+    # SQLAlchemy Connection Pooling Configuration for Performance (Optimized for Bulk Operations)
     app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
-        'pool_size': 20,          # Number of connections to keep in pool
-        'max_overflow': 40,       # Max additional connections beyond pool_size
+        'pool_size': 30,          # Increased for bulk operations
+        'max_overflow': 50,       # More overflow connections for peak loads
         'pool_pre_ping': True,    # Test connections before using them
-        'pool_recycle': 3600,     # Recycle connections after 1 hour
-        'pool_timeout': 30,       # Timeout for getting connection from pool
+        'pool_recycle': 1800,     # Recycle connections after 30 minutes (reduced for bulk ops)
+        'pool_timeout': 60,       # Increased timeout for bulk operations
         'echo': False             # Set to True for SQL query logging in development
     }
 

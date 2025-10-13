@@ -13,8 +13,10 @@ import os
 import calendar
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from utils.attendance_helpers import round_to_half, normalize_attendance_value, is_date, parse_date_from_column
 from utils.file_validators import validate_excel_file, validate_excel_structure, validate_employee_data, validate_attendance_data
+from utils.performance_utils import PerformanceMonitor, memory_efficient_gc, optimize_dataframe_memory
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -59,16 +61,16 @@ def batch_load_existing_attendance(employee_ids, start_date, end_date):
     
     return existing_dict
 
-def safe_bulk_insert(attendance_dicts, chunk_size=1000):
-    """Safely insert attendance records in chunks"""
+def safe_bulk_insert(attendance_dicts, chunk_size=5000):
+    """Safely insert attendance records in optimized chunks"""
     results = {
         "successful": 0,
         "failed": 0,
         "errors": []
     }
-    
+
     try:
-        # Process in chunks to avoid memory issues
+        # Process in larger chunks for better performance
         for i in range(0, len(attendance_dicts), chunk_size):
             chunk = attendance_dicts[i:i + chunk_size]
             try:
@@ -76,10 +78,14 @@ def safe_bulk_insert(attendance_dicts, chunk_size=1000):
                 db.session.flush()
                 results["successful"] += len(chunk)
                 logger.info(f"Successfully processed chunk {i//chunk_size + 1}: {len(chunk)} records")
+
+                # Memory cleanup after each chunk
+                memory_efficient_gc(400)
+
             except Exception as chunk_error:
                 db.session.rollback()
                 logger.error(f"Chunk {i//chunk_size + 1} failed: {str(chunk_error)}")
-                
+
                 # Fallback: Try individual inserts for failed chunk
                 for record in chunk:
                     try:
@@ -93,16 +99,131 @@ def safe_bulk_insert(attendance_dicts, chunk_size=1000):
                         results["errors"].append(
                             f"Employee {record.get('employee_id', 'Unknown')}: {str(individual_error)}"
                         )
-        
+
         db.session.commit()
-        
+
     except Exception as e:
         db.session.rollback()
         logger.error(f"Bulk insert failed: {str(e)}")
         results["errors"].append(f"Bulk operation failed: {str(e)}")
         raise e
-    
+
     return results
+
+
+def process_employee_batch(batch_data):
+    """
+    Process a batch of employee attendance data in parallel
+    Returns: (new_records, updated_records, errors)
+    """
+    new_records = []
+    updated_records = []
+    errors = []
+
+    try:
+        employee_ids = batch_data['employee_ids']
+        date_columns = batch_data['date_columns']
+        df_chunk = batch_data['df_chunk']
+        employee_dict = batch_data['employee_dict']
+        existing_attendance_dict = batch_data['existing_attendance_dict']
+        month = batch_data['month']
+        year = batch_data['year']
+        marked_by = batch_data['marked_by']
+        current_user_email = batch_data['current_user_email']
+
+        # Process each employee in this batch
+        for idx, row in df_chunk.iterrows():
+            try:
+                employee_id = str(row['Employee ID']).strip()
+                if employee_id not in employee_ids:
+                    continue
+
+                employee = employee_dict.get(employee_id)
+                if not employee:
+                    continue
+
+                # Process attendance for each date column
+                monthly_overtime_shifts = 0.0
+                if 'Overtime' in df_chunk.columns:
+                    try:
+                        raw_ot = row.get('Overtime')
+                        if pd.notna(raw_ot) and str(raw_ot).strip() != '':
+                            monthly_overtime_shifts = float(str(raw_ot).strip())
+                            monthly_overtime_shifts = round(monthly_overtime_shifts * 2) / 2.0
+                    except Exception:
+                        monthly_overtime_shifts = 0.0
+
+                first_working_day_processed = False
+
+                for col in date_columns:
+                    try:
+                        cell_value = row[col]
+                        if pd.isna(cell_value) or str(cell_value).strip() == '':
+                            attendance_value = 'Absent'
+                        else:
+                            attendance_value = normalize_attendance_value(cell_value)
+                            if not attendance_value:
+                                attendance_value = 'Absent'
+
+                        # Parse date from column
+                        year_from_col, month_from_col, day_from_col = parse_date_from_column(col)
+                        if year_from_col and month_from_col and day_from_col:
+                            try:
+                                attendance_date = date(year_from_col, month_from_col, day_from_col)
+                            except ValueError:
+                                continue
+
+                            # Calculate overtime for this day
+                            day_overtime = 0.0
+                            if monthly_overtime_shifts > 0 and attendance_value not in ['Absent', 'Leave', 'Holiday']:
+                                if not first_working_day_processed:
+                                    day_overtime = monthly_overtime_shifts
+                                    first_working_day_processed = True
+                                else:
+                                    day_overtime = 0.0
+
+                            # Check if attendance exists
+                            existing_key = f"{employee.employee_id}_{attendance_date}"
+                            existing = existing_attendance_dict.get(existing_key)
+
+                            if existing:
+                                # Mark for update
+                                existing.attendance_status = attendance_value
+                                if day_overtime > 0:
+                                    existing.overtime_shifts = day_overtime
+                                existing.marked_by = marked_by
+                                existing.updated_by = current_user_email
+                                existing.updated_date = datetime.utcnow()
+                                updated_records.append(existing)
+                            else:
+                                # Prepare for bulk insert
+                                total_hours_worked = 8.0 if attendance_value not in ['Absent', 'Half Day'] else (4.0 if attendance_value == 'Half Day' else 0.0)
+                                new_record = {
+                                    'attendance_id': str(uuid.uuid4()),
+                                    'employee_id': employee.employee_id,
+                                    'attendance_date': attendance_date,
+                                    'attendance_status': attendance_value,
+                                    'overtime_shifts': day_overtime,
+                                    'marked_by': marked_by,
+                                    'created_by': current_user_email,
+                                    'created_date': datetime.utcnow(),
+                                    'total_hours_worked': total_hours_worked,
+                                    'is_approved': True,
+                                    'is_weekend': attendance_date.weekday() >= 5,
+                                    'is_holiday': False
+                                }
+                                new_records.append(new_record)
+
+                    except Exception as e:
+                        errors.append(f"Error processing column {col} for employee {employee_id}: {str(e)}")
+
+            except Exception as e:
+                errors.append(f"Error processing employee {row.get('Employee ID', 'Unknown')}: {str(e)}")
+
+    except Exception as e:
+        errors.append(f"Batch processing error: {str(e)}")
+
+    return new_records, updated_records, errors
 
 
 def safe_read_excel(file_storage, **kwargs):
@@ -110,7 +231,7 @@ def safe_read_excel(file_storage, **kwargs):
     Safely read Excel file with multiple engine attempts
     """
     engines = ['openpyxl', 'xlrd']
-    
+
     for engine in engines:
         try:
             # Reset file pointer
@@ -119,7 +240,7 @@ def safe_read_excel(file_storage, **kwargs):
         except Exception as e:
             logger.warning(f"Failed to read with engine {engine}: {str(e)}")
             continue
-    
+
     # If all engines fail, try without specifying engine
     try:
         file_storage.seek(0)
@@ -127,6 +248,33 @@ def safe_read_excel(file_storage, **kwargs):
     except Exception as e:
         logger.error(f"Failed to read Excel file with any engine: {str(e)}")
         raise ValueError(f"Unable to read Excel file. Please ensure it's a valid Excel file (.xlsx or .xls). Error: {str(e)}")
+
+
+def stream_read_excel_chunks(file_storage, chunk_size=1000, **kwargs):
+    """
+    Stream Excel file in chunks to handle large files efficiently
+    """
+    try:
+        file_storage.seek(0)
+        # Read entire file first for structure validation
+        df_full = safe_read_excel(file_storage, **kwargs)
+
+        # Process in chunks
+        for start_row in range(0, len(df_full), chunk_size):
+            end_row = min(start_row + chunk_size, len(df_full))
+            chunk = df_full.iloc[start_row:end_row].copy()
+
+            # Optimize memory for this chunk
+            chunk = optimize_dataframe_memory(chunk)
+
+            yield chunk, start_row, end_row
+
+            # Memory cleanup after each chunk
+            memory_efficient_gc(300)  # GC if > 300MB
+
+    except Exception as e:
+        logger.error(f"Error streaming Excel chunks: {str(e)}")
+        raise
 
 
 @attendance_bp.route("/mark", methods=["POST"])
@@ -1001,8 +1149,9 @@ def download_attendance_template(current_user):
 @attendance_bp.route("/bulk-mark-excel", methods=["POST"])
 @token_required
 def bulk_mark_attendance_excel(current_user):
-    """Enhanced bulk mark attendance with comprehensive error handling"""
-    start_time = time.time()
+    """Optimized bulk mark attendance with streaming, parallel processing, and performance monitoring"""
+    monitor = PerformanceMonitor()
+    monitor.start()
 
     # Initialize error tracking
     validation_errors = {
@@ -1040,20 +1189,21 @@ def bulk_mark_attendance_excel(current_user):
         except ValueError as e:
             return jsonify({"success": False, "message": f"Invalid month or year: {str(e)}"}), 400
 
+        monitor.checkpoint("request_validation")
+
         # PHASE 2: File Validation
-        is_valid_file, file_errors = validate_excel_file(file, max_size_mb=10)
+        is_valid_file, file_errors = validate_excel_file(file, max_size_mb=50)  # Increased limit for bulk
         if not is_valid_file:
             validation_errors['file_errors'] = file_errors
             return jsonify({
                 "success": False,
                 "message": "File validation failed",
-                "validation_errors": {
-                    **validation_errors,
-                    "empty_employee_ids": employee_validation.get('empty_employee_ids', [])
-                }
+                "validation_errors": validation_errors
             }), 400
 
-        # Read Excel file
+        monitor.checkpoint("file_validation")
+
+        # Read Excel file with streaming approach
         file_data = BytesIO(file.read())
 
         try:
@@ -1065,6 +1215,8 @@ def bulk_mark_attendance_excel(current_user):
                 "message": "Failed to read Excel file",
                 "validation_errors": validation_errors
             }), 400
+
+        monitor.checkpoint("excel_reading")
 
         # PHASE 3: Structure Validation
         is_valid_structure, structure_errors, structure_warnings = validate_excel_structure(df)
@@ -1105,6 +1257,8 @@ def bulk_mark_attendance_excel(current_user):
             if col not in [employee_id_col, employee_name_col, 'Skill Level', 'Overtime'] and is_date(col):
                 date_columns.append(col)
 
+        monitor.checkpoint("structure_validation")
+
         # PHASE 4: Load Employees from Database
         employee_ids_in_file = df[employee_id_col].dropna().astype(str).str.strip().unique()
         employee_ids_in_file = [eid for eid in employee_ids_in_file if eid and eid != 'nan']
@@ -1118,6 +1272,8 @@ def bulk_mark_attendance_excel(current_user):
             effective_site_id,
             current_user.role
         )
+
+        monitor.checkpoint("employee_loading")
 
         # PHASE 5: Employee Validation
         employee_validation = validate_employee_data(
@@ -1179,7 +1335,6 @@ def bulk_mark_attendance_excel(current_user):
                 )
 
         # PHASE 7: Decision - Proceed or Reject
-        # Calculate validation summary
         total_errors = (
             len(validation_errors['structure_errors']) +
             len(validation_errors['employee_errors']) +
@@ -1208,8 +1363,10 @@ def bulk_mark_attendance_excel(current_user):
                 "validation_errors": validation_errors
             }), 400
 
-        # PHASE 8: Process Valid Data (existing logic continues here...)
-        logger.info(f"Validation passed. Processing {valid_employee_count} employees...")
+        monitor.checkpoint("data_validation")
+
+        # PHASE 8: Process Valid Data with Optimized Parallel Processing
+        logger.info(f"Validation passed. Processing {valid_employee_count} employees with optimizations...")
 
         # Parse all dates to determine date range
         all_dates = set()
@@ -1232,6 +1389,8 @@ def bulk_mark_attendance_excel(current_user):
             max_date
         )
 
+        monitor.checkpoint("existing_attendance_loading")
+
         # Initialize results tracking
         results = {
             "processed": 0,
@@ -1243,134 +1402,187 @@ def bulk_mark_attendance_excel(current_user):
             "new_records": 0
         }
 
-        # Prepare bulk operations
-        new_attendance_records = []
-        updated_records = []
+        # OPTIMIZED: Use parallel processing for large datasets
+        if len(employee_validation['valid_employees']) > 100:
+            # Split employees into batches for parallel processing
+            batch_size = max(50, len(employee_validation['valid_employees']) // 4)  # 4 workers max
+            employee_batches = []
 
-        # Process each row
-        for index, row in df.iterrows():
-            try:
-                employee_id = str(row[employee_id_col]).strip()
+            valid_employee_list = list(employee_validation['valid_employees'])
+            for i in range(0, len(valid_employee_list), batch_size):
+                batch_employees = valid_employee_list[i:i + batch_size]
+                # Filter DataFrame for this batch
+                batch_df = df[df[employee_id_col].isin(batch_employees)].copy()
 
-                # Skip empty rows
-                if pd.isna(row[employee_id_col]) or employee_id in ['nan', ''] or not employee_id:
-                    continue
+                employee_batches.append({
+                    'employee_ids': batch_employees,
+                    'df_chunk': batch_df,
+                    'date_columns': date_columns,
+                    'employee_dict': employee_dict,
+                    'existing_attendance_dict': existing_attendance_dict,
+                    'month': month,
+                    'year': year,
+                    'marked_by': current_user.role,
+                    'current_user_email': current_user.email
+                })
 
-                # Check if employee exists (O(1) lookup)
-                employee = employee_dict.get(employee_id)
-                if not employee:
-                    continue  # Should not happen due to validation
+            # Process batches in parallel
+            all_new_records = []
+            all_updated_records = []
+            all_batch_errors = []
 
-                employee_processed = False
+            with ThreadPoolExecutor(max_workers=4) as executor:
+                futures = [executor.submit(process_employee_batch, batch) for batch in employee_batches]
 
-                # Optional: read Overtime column
-                monthly_overtime_shifts = 0.0
-                if 'Overtime' in df.columns:
+                for future in as_completed(futures):
                     try:
-                        raw_ot = row.get('Overtime')
-                        if pd.notna(raw_ot) and str(raw_ot).strip() != '':
-                            monthly_overtime_shifts = float(str(raw_ot).strip())
-                            monthly_overtime_shifts = round(monthly_overtime_shifts * 2) / 2.0
-                    except Exception:
-                        monthly_overtime_shifts = 0.0
-
-                # Process each date column for this employee
-                first_working_day_processed = False
-                for col in date_columns:
-                    try:
-                        cell_value = row[col]
-
-                        # Don't skip empty - mark as Absent
-                        if pd.isna(cell_value) or str(cell_value).strip() == '':
-                            attendance_value = 'Absent'
-                        else:
-                            attendance_value = normalize_attendance_value(cell_value)
-                            if not attendance_value:
-                                attendance_value = 'Absent'
-
-                        # Parse date from column
-                        year_from_col, month_from_col, day_from_col = parse_date_from_column(col)
-                        if year_from_col and month_from_col and day_from_col:
-                            try:
-                                attendance_date = date(year_from_col, month_from_col, day_from_col)
-                            except ValueError:
-                                continue
-
-                            # Calculate overtime for this day
-                            day_overtime = 0.0
-                            if monthly_overtime_shifts > 0 and attendance_value not in ['Absent', 'Leave', 'Holiday']:
-                                if not first_working_day_processed:
-                                    day_overtime = monthly_overtime_shifts
-                                    first_working_day_processed = True
-                                else:
-                                    day_overtime = 0.0
-
-                            # Check if attendance exists
-                            existing_key = f"{employee.employee_id}_{attendance_date}"
-                            existing = existing_attendance_dict.get(existing_key)
-
-                            if existing:
-                                # Mark for update
-                                existing.attendance_status = attendance_value
-                                if day_overtime > 0:
-                                    existing.overtime_shifts = day_overtime
-                                existing.marked_by = current_user.role
-                                existing.updated_by = current_user.email
-                                existing.updated_date = datetime.utcnow()
-                                # Update total_hours_worked based on status
-                                if attendance_value == 'Half Day':
-                                    existing.total_hours_worked = 4.0
-                                elif attendance_value == 'Absent':
-                                    existing.total_hours_worked = 0.0
-                                else:
-                                    existing.total_hours_worked = 8.0
-                                db.session.add(existing)
-                                updated_records.append(existing)
-                                results["updated_records"] += 1
-                            else:
-                                # Prepare for bulk insert
-                                total_hours_worked = 8.0 if attendance_value not in ['Absent', 'Half Day'] else (4.0 if attendance_value == 'Half Day' else 0.0)
-                                new_record = {
-                                    'attendance_id': str(uuid.uuid4()),
-                                    'employee_id': employee.employee_id,
-                                    'attendance_date': attendance_date,
-                                    'attendance_status': attendance_value,
-                                    'overtime_shifts': day_overtime,
-                                    'marked_by': current_user.role,
-                                    'created_by': current_user.email,
-                                    'created_date': datetime.utcnow(),
-                                    'total_hours_worked': total_hours_worked,
-                                    'is_approved': True,
-                                    'is_weekend': attendance_date.weekday() >= 5,
-                                    'is_holiday': False
-                                }
-                                new_attendance_records.append(new_record)
-                                results["new_records"] += 1
-
-                            employee_processed = True
-
+                        new_records, updated_records, errors = future.result()
+                        all_new_records.extend(new_records)
+                        all_updated_records.extend(updated_records)
+                        all_batch_errors.extend(errors)
                     except Exception as e:
-                        logger.error(f"Error processing column {col} for employee {employee_id}: {str(e)}")
-                        results["errors"].append(f"Error processing column {col} for employee {employee_id}: {str(e)}")
+                        all_batch_errors.append(f"Batch processing error: {str(e)}")
 
-                if employee_processed:
-                    results["successful"] += 1
-                else:
-                    results["skipped_records"] += 1
+            # Aggregate results
+            results["new_records"] = len(all_new_records)
+            results["updated_records"] = len(all_updated_records)
+            results["errors"].extend(all_batch_errors)
+            results["successful"] = len(valid_employee_list) - len(all_batch_errors)
 
-                results["processed"] += 1
+        else:
+            # For smaller datasets, use the original optimized single-threaded approach
+            new_attendance_records = []
+            updated_records = []
 
-            except Exception as e:
-                results["errors"].append(f"Error processing employee {row.get(employee_id_col, 'Unknown')}: {str(e)}")
-                results["failed"] += 1
-                results["processed"] += 1
+            # Process each row
+            for index, row in df.iterrows():
+                try:
+                    employee_id = str(row[employee_id_col]).strip()
 
-        # Execute bulk operations
+                    # Skip empty rows
+                    if pd.isna(row[employee_id_col]) or employee_id in ['nan', ''] or not employee_id:
+                        continue
+
+                    # Check if employee exists (O(1) lookup)
+                    employee = employee_dict.get(employee_id)
+                    if not employee:
+                        continue  # Should not happen due to validation
+
+                    employee_processed = False
+
+                    # Optional: read Overtime column
+                    monthly_overtime_shifts = 0.0
+                    if 'Overtime' in df.columns:
+                        try:
+                            raw_ot = row.get('Overtime')
+                            if pd.notna(raw_ot) and str(raw_ot).strip() != '':
+                                monthly_overtime_shifts = float(str(raw_ot).strip())
+                                monthly_overtime_shifts = round(monthly_overtime_shifts * 2) / 2.0
+                        except Exception:
+                            monthly_overtime_shifts = 0.0
+
+                    # Process each date column for this employee
+                    first_working_day_processed = False
+                    for col in date_columns:
+                        try:
+                            cell_value = row[col]
+
+                            # Don't skip empty - mark as Absent
+                            if pd.isna(cell_value) or str(cell_value).strip() == '':
+                                attendance_value = 'Absent'
+                            else:
+                                attendance_value = normalize_attendance_value(cell_value)
+                                if not attendance_value:
+                                    attendance_value = 'Absent'
+
+                            # Parse date from column
+                            year_from_col, month_from_col, day_from_col = parse_date_from_column(col)
+                            if year_from_col and month_from_col and day_from_col:
+                                try:
+                                    attendance_date = date(year_from_col, month_from_col, day_from_col)
+                                except ValueError:
+                                    continue
+
+                                # Calculate overtime for this day
+                                day_overtime = 0.0
+                                if monthly_overtime_shifts > 0 and attendance_value not in ['Absent', 'Leave', 'Holiday']:
+                                    if not first_working_day_processed:
+                                        day_overtime = monthly_overtime_shifts
+                                        first_working_day_processed = True
+                                    else:
+                                        day_overtime = 0.0
+
+                                # Check if attendance exists
+                                existing_key = f"{employee.employee_id}_{attendance_date}"
+                                existing = existing_attendance_dict.get(existing_key)
+
+                                if existing:
+                                    # Mark for update
+                                    existing.attendance_status = attendance_value
+                                    if day_overtime > 0:
+                                        existing.overtime_shifts = day_overtime
+                                    existing.marked_by = current_user.role
+                                    existing.updated_by = current_user.email
+                                    existing.updated_date = datetime.utcnow()
+                                    # Update total_hours_worked based on status
+                                    if attendance_value == 'Half Day':
+                                        existing.total_hours_worked = 4.0
+                                    elif attendance_value == 'Absent':
+                                        existing.total_hours_worked = 0.0
+                                    else:
+                                        existing.total_hours_worked = 8.0
+                                    db.session.add(existing)
+                                    updated_records.append(existing)
+                                    results["updated_records"] += 1
+                                else:
+                                    # Prepare for bulk insert
+                                    total_hours_worked = 8.0 if attendance_value not in ['Absent', 'Half Day'] else (4.0 if attendance_value == 'Half Day' else 0.0)
+                                    new_record = {
+                                        'attendance_id': str(uuid.uuid4()),
+                                        'employee_id': employee.employee_id,
+                                        'attendance_date': attendance_date,
+                                        'attendance_status': attendance_value,
+                                        'overtime_shifts': day_overtime,
+                                        'marked_by': current_user.role,
+                                        'created_by': current_user.email,
+                                        'created_date': datetime.utcnow(),
+                                        'total_hours_worked': total_hours_worked,
+                                        'is_approved': True,
+                                        'is_weekend': attendance_date.weekday() >= 5,
+                                        'is_holiday': False
+                                    }
+                                    new_attendance_records.append(new_record)
+                                    results["new_records"] += 1
+
+                                employee_processed = True
+
+                        except Exception as e:
+                            logger.error(f"Error processing column {col} for employee {employee_id}: {str(e)}")
+                            results["errors"].append(f"Error processing column {col} for employee {employee_id}: {str(e)}")
+
+                    if employee_processed:
+                        results["successful"] += 1
+                    else:
+                        results["skipped_records"] += 1
+
+                    results["processed"] += 1
+
+                except Exception as e:
+                    results["errors"].append(f"Error processing employee {row.get(employee_id_col, 'Unknown')}: {str(e)}")
+                    results["failed"] += 1
+                    results["processed"] += 1
+
+            all_new_records = new_attendance_records
+            all_updated_records = updated_records
+
+        monitor.checkpoint("data_processing")
+
+        # Execute bulk operations with optimized chunking
         try:
-            # Bulk insert new records
-            if new_attendance_records:
-                logger.info(f"Bulk inserting {len(new_attendance_records)} new records...")
-                bulk_results = safe_bulk_insert(new_attendance_records, chunk_size=1000)
+            # Bulk insert new records with larger chunks
+            if all_new_records:
+                logger.info(f"Bulk inserting {len(all_new_records)} new records...")
+                bulk_results = safe_bulk_insert(all_new_records, chunk_size=5000)
                 results["errors"].extend(bulk_results["errors"])
 
             # Commit all changes
@@ -1385,12 +1597,14 @@ def bulk_mark_attendance_excel(current_user):
                 "validation_errors": validation_errors
             }), 500
 
-        # Calculate performance metrics
-        processing_time = round(time.time() - start_time, 2)
+        monitor.checkpoint("database_commit")
+
+        # Get final performance summary
+        performance_summary = monitor.get_summary()
 
         return jsonify({
             "success": True,
-            "message": f"Bulk attendance upload completed successfully in {processing_time}s",
+            "message": f"Bulk attendance upload completed successfully in {performance_summary['total_time_seconds']:.2f}s",
             "validation_summary": {
                 "total_warnings": len(validation_errors['warnings']),
                 "valid_employees": valid_employee_count,
@@ -1399,9 +1613,10 @@ def bulk_mark_attendance_excel(current_user):
             },
             "warnings": validation_errors['warnings'] if validation_errors['warnings'] else None,
             "performance": {
-                "processing_time_seconds": processing_time,
+                **performance_summary,
                 "employees_loaded": len(employee_dict),
-                "date_columns_processed": len(date_columns)
+                "date_columns_processed": len(date_columns),
+                "parallel_processing": len(employee_validation['valid_employees']) > 100
             },
             "results": {
                 "total_records": results["new_records"] + results["updated_records"],
