@@ -2,12 +2,19 @@
 Performance monitoring utilities for bulk operations
 """
 import time
-import psutil
 import gc
 from functools import wraps
 import logging
 
 logger = logging.getLogger(__name__)
+
+# Optional psutil import for memory monitoring
+try:
+    import psutil
+    HAS_PSUTIL = True
+except ImportError:
+    HAS_PSUTIL = False
+    logger.warning("psutil not available - memory monitoring disabled")
 
 class PerformanceMonitor:
     """Monitor performance metrics during bulk operations"""
@@ -20,7 +27,10 @@ class PerformanceMonitor:
     def start(self):
         """Start performance monitoring"""
         self.start_time = time.time()
-        self.start_memory = psutil.Process().memory_info().rss / 1024 / 1024  # MB
+        if HAS_PSUTIL:
+            self.start_memory = psutil.Process().memory_info().rss / 1024 / 1024  # MB
+        else:
+            self.start_memory = 0
         self.checkpoints = []
         logger.info(".2f")
 
@@ -30,10 +40,14 @@ class PerformanceMonitor:
             return
 
         current_time = time.time()
-        current_memory = psutil.Process().memory_info().rss / 1024 / 1024  # MB
+        if HAS_PSUTIL:
+            current_memory = psutil.Process().memory_info().rss / 1024 / 1024  # MB
+            memory_delta = current_memory - self.start_memory
+        else:
+            current_memory = 0
+            memory_delta = 0
 
         elapsed = current_time - self.start_time
-        memory_delta = current_memory - self.start_memory
 
         checkpoint_data = {
             'name': name,
@@ -51,8 +65,12 @@ class PerformanceMonitor:
             return {}
 
         total_time = time.time() - self.start_time
-        end_memory = psutil.Process().memory_info().rss / 1024 / 1024
-        memory_delta = end_memory - self.start_memory
+        if HAS_PSUTIL:
+            end_memory = psutil.Process().memory_info().rss / 1024 / 1024
+            memory_delta = end_memory - self.start_memory
+        else:
+            end_memory = 0
+            memory_delta = 0
 
         return {
             'total_time_seconds': total_time,
@@ -86,6 +104,10 @@ def performance_monitor(operation_name="operation"):
 
 def memory_efficient_gc(memory_threshold_mb=500):
     """Trigger garbage collection if memory usage is high"""
+    if not HAS_PSUTIL:
+        gc.collect()  # Always collect if psutil not available
+        return
+
     current_memory = psutil.Process().memory_info().rss / 1024 / 1024
 
     if current_memory > memory_threshold_mb:

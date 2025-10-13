@@ -24,9 +24,6 @@ def upgrade():
         # Index for bulk attendance queries by employee and date range
         batch_op.create_index('idx_attendance_employee_date_range', ['employee_id', 'attendance_date'], unique=False)
 
-        # Index for site-based bulk operations (through employee joins)
-        batch_op.create_index('idx_attendance_site_date', ['site_id', 'attendance_date'], unique=False)
-
         # Index for monthly bulk operations
         batch_op.create_index('idx_attendance_month_year', [sa.text("EXTRACT(YEAR FROM attendance_date)"), sa.text("EXTRACT(MONTH FROM attendance_date)")], unique=False)
 
@@ -50,7 +47,6 @@ def downgrade():
     with op.batch_alter_table('attendance', schema=None) as batch_op:
         batch_op.drop_index('idx_attendance_marked_by_date')
         batch_op.drop_index('idx_attendance_month_year')
-        batch_op.drop_index('idx_attendance_site_date')
         batch_op.drop_index('idx_attendance_employee_date_range')
 
     # ### end Alembic commands ###
