@@ -29,7 +29,8 @@ def create_app(register_blueprints: bool = True):
         "http://localhost:3001",
         "http://127.0.0.1:3000",
         "http://127.0.0.1:3001",
-        "https://employee-management-frontend-kohl-eight.vercel.app"
+        "https://employee-management-frontend-kohl-eight.vercel.app",
+        "https://ssplsecurity.in"
     ]
 
     # Add additional origins from environment variable if set
@@ -59,21 +60,6 @@ def create_app(register_blueprints: bool = True):
          automatic_options=True,
          max_age=86400)  # Cache preflight for 24 hours
     
-    # Add explicit OPTIONS handler for debugging
-    @app.before_request
-    def handle_preflight():
-        if request.method == "OPTIONS":
-            origin = request.headers.get('Origin', '*')
-            # Check if origin is in allowed origins
-            if origin in allowed_origins or origin == '*':
-                response = make_response()
-                response.headers.add("Access-Control-Allow-Origin", origin)
-                response.headers.add('Access-Control-Allow-Headers', "Content-Type, Authorization, X-Requested-With, Accept, Origin, Access-Control-Allow-Origin, X-CSRF-Token, X-Requested-With")
-                response.headers.add('Access-Control-Allow-Methods', "GET, POST, PUT, DELETE, OPTIONS, PATCH")
-                response.headers.add('Access-Control-Allow-Credentials', "true")
-                response.headers.add('Access-Control-Max-Age', "86400")
-                return response
-
     app.config["SQLALCHEMY_DATABASE_URI"] = SQLALCHEMY_DATABASE_URI
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = SQLALCHEMY_TRACK_MODIFICATIONS
     app.config["MAX_CONTENT_LENGTH"] = MAX_CONTENT_LENGTH
@@ -201,8 +187,6 @@ def create_app(register_blueprints: bool = True):
     @app.route("/health")
     def health_check():
         return {"status": "healthy", "timestamp": datetime.now().isoformat()}
-
-    # Rely on Flask-CORS for preflight handling to avoid conflicts with credentials
 
     return app
 

@@ -62,13 +62,23 @@ def apply_constraints():
     print("🔒 Applying database constraints...")
 
     try:
-        # Attendance status constraint (Present, Absent, OFF only)
-        constraint_sql = """
-        ALTER TABLE attendance
-        ADD CONSTRAINT IF NOT EXISTS check_attendance_status
-        CHECK (attendance_status IN ('Present', 'Absent', 'OFF'))
-        """
-        db.session.execute(text(constraint_sql))
+        # Check if constraint already exists
+        existing_constraint = db.session.execute(text("""
+            SELECT 1 FROM pg_constraint
+            WHERE conname = 'check_attendance_status'
+        """)).fetchone()
+
+        if existing_constraint:
+            print("⚠️  Attendance status constraint already exists, skipping...")
+        else:
+            # Attendance status constraint (Present, Absent, OFF only)
+            constraint_sql = """
+            ALTER TABLE attendance
+            ADD CONSTRAINT check_attendance_status
+            CHECK (attendance_status IN ('Present', 'Absent', 'OFF'))
+            """
+            db.session.execute(text(constraint_sql))
+            print("✅ Attendance status constraint added")
 
         # Employee ID format constraint (if needed)
         # Add other constraints here as they are developed

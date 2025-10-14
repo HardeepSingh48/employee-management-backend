@@ -5,6 +5,9 @@ Flask-Migrate==4.0.5
 Flask-CORS==4.0.0
 Flask-JWT-Extended==4.5.3
 
+# JWT for token handling
+PyJWT==2.8.0
+
 # Database
 psycopg2-binary==2.9.7
 SQLAlchemy==2.0.21
