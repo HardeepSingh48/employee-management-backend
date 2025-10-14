@@ -34,7 +34,7 @@ def create_superadmin(email, password):
 
 if __name__ == "__main__":
     # You can change these credentials
-    SUPERADMIN_EMAIL = "superadmin@company.com"
-    SUPERADMIN_PASSWORD = "superadmin123"
+    SUPERADMIN_EMAIL = "superadmin@ssplsecurity.com"
+    SUPERADMIN_PASSWORD = "$Gahir.Harry@98"
 
     create_superadmin(SUPERADMIN_EMAIL, SUPERADMIN_PASSWORD)
