@@ -116,13 +116,13 @@ def mark_self_attendance(current_user):
             check_out_datetime = datetime.fromisoformat(f"{attendance_date}T{check_out_time}:00")
         
         # Mark attendance using the service
-        result = AttendanceService.mark_attendance(
+        result = AttendanceService.mark_or_update_attendance(
             employee_id=current_user.employee_id,
             attendance_date=attendance_date,
             attendance_status=attendance_status,
             check_in_time=check_in_datetime,
             check_out_time=check_out_datetime,
-            overtime_hours=overtime_hours,
+            overtime_shifts=overtime_hours,
             remarks=remarks,
             marked_by='employee'
         )

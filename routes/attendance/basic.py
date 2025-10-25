@@ -81,7 +81,7 @@ def mark_attendance(current_user):
         overtime_shifts = round_to_half(overtime_shifts)
         
         # Mark attendance
-        result = AttendanceService.mark_attendance(
+        result = AttendanceService.mark_or_update_attendance(
             employee_id=employee_id,
             attendance_date=attendance_date,
             attendance_status=attendance_status,

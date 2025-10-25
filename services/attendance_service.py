@@ -193,9 +193,9 @@ class AttendanceService:
         """
         results = []
         successful_count = 0
-        
+
         for record in attendance_records:
-            result = AttendanceService.mark_attendance(
+            result = AttendanceService.mark_or_update_attendance(
                 employee_id=record.get('employee_id'),
                 attendance_date=record.get('attendance_date'),
                 attendance_status=record.get('attendance_status', 'Present'),
@@ -205,15 +205,15 @@ class AttendanceService:
                 remarks=record.get('remarks'),
                 marked_by=marked_by
             )
-            
+
             results.append({
                 "employee_id": record.get('employee_id'),
                 "result": result
             })
-            
+
             if result["success"]:
                 successful_count += 1
-        
+
         return {
             "success": True,
             "message": f"Processed {len(attendance_records)} records. {successful_count} successful.",

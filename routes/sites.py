@@ -63,8 +63,8 @@ def get_sites(current_user):
 @sites_bp.route('/', methods=['POST'])
 @token_required
 def create_site(current_user):
-    """Create new site (admin only)"""
-    if current_user.role != 'admin':
+    """Create new site (admin and superadmin only)"""
+    if current_user.role not in ['admin', 'superadmin']:
         return jsonify({"success": False, "message": "Unauthorized"}), 403
     
     try:
@@ -107,8 +107,8 @@ def create_site(current_user):
 @sites_bp.route('/bulk', methods=['POST'])
 @token_required
 def bulk_import_sites(current_user):
-    """Bulk import sites from Excel/CSV file (admin only)"""
-    if current_user.role != 'admin':
+    """Bulk import sites from Excel/CSV file (admin and superadmin only)"""
+    if current_user.role not in ['admin', 'superadmin']:
         return jsonify({"success": False, "message": "Unauthorized"}), 403
     
     try:
@@ -199,8 +199,8 @@ def bulk_import_sites(current_user):
 @sites_bp.route('/<site_id>', methods=['PUT'])
 @token_required
 def update_site(current_user, site_id):
-    """Update site details (admin only)"""
-    if current_user.role != 'admin':
+    """Update site details (admin and superadmin only)"""
+    if current_user.role not in ['admin', 'superadmin']:
         return jsonify({"success": False, "message": "Unauthorized"}), 403
     
     try:
@@ -244,8 +244,8 @@ def update_site(current_user, site_id):
 @sites_bp.route('/<site_id>', methods=['DELETE'])
 @token_required
 def delete_site(current_user, site_id):
-    """Delete site (admin only)"""
-    if current_user.role != 'admin':
+    """Delete site (admin and superadmin only)"""
+    if current_user.role not in ['admin', 'superadmin']:
         return jsonify({"success": False, "message": "Unauthorized"}), 403
     
     try:
