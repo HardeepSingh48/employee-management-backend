@@ -1,6 +1,7 @@
 from flask import Blueprint, request, jsonify, make_response
 from models import db
 from models.wage_master import WageMaster
+from models.employee import Employee
 from utils.validators import validate_wage_master_data
 import re
 from functools import wraps
@@ -406,6 +407,21 @@ def update_salary_code(salary_code):
         if errors:
             return jsonify({"success": False, "message": "Validation errors", "errors": errors}), 400
 
+        # Check if salary code is being used by employees
+        employee_count = Employee.query.filter_by(salary_code=salary_code).count()
+
+        # Determine if site_name, rank, or state are changing
+        site_changing = payload.get("site_name") and payload.get("site_name") != wage.site_name
+        rank_changing = payload.get("rank") and payload.get("rank") != wage.rank
+        state_changing = payload.get("state") and payload.get("state") != wage.state
+
+        # If employees are using this code and site/rank/state would change, prevent update
+        if employee_count > 0 and (site_changing or rank_changing or state_changing):
+            return jsonify({
+                "success": False,
+                "message": f"Cannot modify site/rank/state because this salary code is being used by {employee_count} employee(s)"
+            }), 400
+
         # Update fields
         wage.site_name = payload.get("site_name", wage.site_name)
         wage.rank = payload.get("rank", wage.rank)
@@ -413,13 +429,14 @@ def update_salary_code(salary_code):
         wage.base_wage = float(payload.get("base_wage", wage.base_wage))
         wage.skill_level = payload.get("skill_level", wage.skill_level)
 
-        # Regenerate salary code if site/rank/state changed
-        new_salary_code = _generate_salary_code(wage.site_name, wage.rank, wage.state)
-        if new_salary_code != wage.salary_code:
-            wage.salary_code = new_salary_code
+        # Regenerate salary code if site/rank/state changed (only if no employees are using it)
+        if employee_count == 0:
+            new_salary_code = _generate_salary_code(wage.site_name, wage.rank, wage.state)
+            if new_salary_code != wage.salary_code:
+                wage.salary_code = new_salary_code
 
         db.session.commit()
-        
+
         return jsonify({
             "success": True,
             "message": "Salary code updated successfully",
