@@ -113,6 +113,7 @@ def list_salary_codes():
                 "state": wage.state,
                 "base_wage": wage.base_wage,
                 "skill_level": wage.skill_level,
+                "sspl_wages": wage.sspl_wages,
                 "is_active": wage.is_active,
                 "created_at": wage.created_at.isoformat() if wage.created_at else None,
                 "display_name": f"{wage.salary_code} - {wage.site_name} | {wage.rank} | {wage.state} (₹{wage.base_wage})"
@@ -219,6 +220,7 @@ def create_salary_code():
             state=payload["state"],
             base_wage=float(payload["base_wage"]),
             skill_level=skill_level,
+            sspl_wages=float(payload.get("sspl_wages", 0)) if payload.get("sspl_wages") else None,
             created_by=payload.get("created_by", "admin")
         )
         
@@ -236,6 +238,7 @@ def create_salary_code():
                 "state": wage_master.state,
                 "base_wage": wage_master.base_wage,
                 "skill_level": wage_master.skill_level,
+                "sspl_wages": wage_master.sspl_wages,
                 "display_name": f"{wage_master.salary_code} - {wage_master.site_name} | {wage_master.rank} | {wage_master.state} (₹{wage_master.base_wage})"
             }
         }), 201
@@ -295,6 +298,7 @@ def bulk_create_salary_codes():
                     state=code_data["state"],
                     base_wage=float(code_data["base_wage"]),
                     skill_level="Not Specified",  # Default value, will be set during employee registration
+                    sspl_wages=float(code_data.get("sspl_wages", 0)) if code_data.get("sspl_wages") else None,
                     created_by=code_data.get("created_by", "admin")
                 )
                 
@@ -380,6 +384,7 @@ def get_salary_code(salary_code):
                 "state": wage.state,
                 "base_wage": wage.base_wage,
                 "skill_level": wage.skill_level,
+                "sspl_wages": wage.sspl_wages,
                 "is_active": wage.is_active,
                 "created_at": wage.created_at.isoformat() if wage.created_at else None,
                 "display_name": f"{wage.salary_code} - {wage.site_name} | {wage.rank} | {wage.state} (₹{wage.base_wage})"
@@ -428,6 +433,7 @@ def update_salary_code(salary_code):
         wage.state = payload.get("state", wage.state)
         wage.base_wage = float(payload.get("base_wage", wage.base_wage))
         wage.skill_level = payload.get("skill_level", wage.skill_level)
+        wage.sspl_wages = float(payload.get("sspl_wages", wage.sspl_wages)) if payload.get("sspl_wages") is not None else wage.sspl_wages
 
         # Regenerate salary code if site/rank/state changed (only if no employees are using it)
         if employee_count == 0:
@@ -447,7 +453,8 @@ def update_salary_code(salary_code):
                 "rank": wage.rank,
                 "state": wage.state,
                 "base_wage": wage.base_wage,
-                "skill_level": wage.skill_level
+                "skill_level": wage.skill_level,
+                "sspl_wages": wage.sspl_wages
             }
         }), 200
     except Exception as e:

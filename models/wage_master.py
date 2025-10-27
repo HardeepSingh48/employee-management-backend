@@ -11,6 +11,7 @@ class WageMaster(db.Model):
     state = db.Column(db.String(50), nullable=False)
     base_wage = db.Column(db.Float, nullable=False)
     skill_level = db.Column(db.String(50), nullable=False)  # Highly Skilled, Skilled, Semi-Skilled, Un-Skilled
+    sspl_wages = db.Column(db.Float, nullable=True)  # SSPL Wages field
     is_active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime(timezone=True), server_default=func.now())
     updated_at = db.Column(db.DateTime(timezone=True), onupdate=func.now())
