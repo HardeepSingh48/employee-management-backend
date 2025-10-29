@@ -79,6 +79,42 @@ def calculate_monthly_salary():
             "message": f"Error calculating monthly salary: {str(e)}"
         }), 500
 
+@salary_bp.route("/calculate-monthly-sspl", methods=["POST"])
+def calculate_monthly_salary_sspl():
+    """
+    Calculate SSPL salary for all employees for a specific month using database records
+    SSPL calculation: Other Deduction = Net Regular - (Basic SSPL + Overtime)
+    """
+    try:
+        data = request.get_json()
+
+        if not data:
+            return jsonify({"success": False, "message": "No data provided"}), 400
+
+        year = data.get('year')
+        month = data.get('month')
+        site_id = data.get('site_id')  # Optional site filter
+
+        if not year or not month:
+            return jsonify({
+                "success": False,
+                "message": "Year and month are required"
+            }), 400
+
+        # Generate SSPL salary data using database records
+        result = SalaryService.generate_monthly_salary_data_sspl(year, month, site_id)
+
+        if result['success']:
+            return jsonify(result), 200
+        else:
+            return jsonify(result), 400
+
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "message": f"Error calculating SSPL monthly salary: {str(e)}"
+        }), 500
+
 @salary_bp.route("/calculate-individual", methods=["POST"])
 def calculate_individual_salary():
     """

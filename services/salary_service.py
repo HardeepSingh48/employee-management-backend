@@ -19,6 +19,20 @@ class SalaryService:
         'Un-Skilled': 526.00
     }
 
+    # SSPL wage rates by skill level (fallback mapping)
+    sspl_wage_map = {
+        'Highly Skilled': 0,
+        'Skilled': 0,
+        'Semi-Skilled': 0,
+        'Un-Skilled': 0
+    }
+    # sspl_wage_map = {
+    #     'Highly Skilled': 700.00,
+    #     'Skilled': 650.00,
+    #     'Semi-Skilled': 600.00,
+    #     'Un-Skilled': 550.00
+    # }
+
     @staticmethod
     def get_employee_daily_wage(employee_id):
         """
@@ -1197,4 +1211,254 @@ class SalaryService:
             return {
                 'success': False,
                 'message': f'Error in bulk deductions calculation: {str(e)}'
+            }
+
+    @staticmethod
+    def get_employee_sspl_daily_wage(employee_id):
+        """
+        Get SSPL daily wage for an employee from their salary code
+        Falls back to skill level mapping if salary code not found
+        """
+        try:
+            employee = Employee.query.filter_by(employee_id=employee_id).first()
+
+            if not employee:
+                return 550.0
+
+            if employee.wage_master and hasattr(employee.wage_master, 'sspl_wages') and employee.wage_master.sspl_wages:
+                return employee.wage_master.sspl_wages
+
+            # Fall back to skill level mapping
+            skill_level = employee.skill_category or 'Un-Skilled'
+            return SalaryService.sspl_wage_map.get(skill_level, 550.0)
+
+        except Exception as e:
+            print(f"Error getting SSPL wage for employee {employee_id}: {str(e)}")
+            return 550.0
+
+    @staticmethod
+    def generate_monthly_salary_data_sspl(year, month, site_id=None):
+        """
+        Generate SSPL salary calculation data using bulk queries
+        SSPL calculation logic: Other Deduction = Net Regular - (Basic SSPL + Overtime)
+        """
+        try:
+            # Import models at function level to avoid scoping issues
+            from models.wage_master import WageMaster
+            from models.site import Site
+
+            first_day = date(year, month, 1)
+            last_day = date(year, month, calendar.monthrange(year, month)[1])
+
+            # ============================================
+            # STEP 1: Get all employees with wage data in ONE JOIN query
+            # ============================================
+
+            if site_id:
+                # When filtering by site, we need to join through WageMaster and Site
+                employees_query = db.session.query(
+                    Employee.employee_id,
+                    Employee.first_name,
+                    Employee.last_name,
+                    Employee.skill_category,
+                    Employee.salary_code,
+                    Employee.wage_rate,
+                    WageMaster.base_wage.label('wage_master_base_wage'),
+                    WageMaster.sspl_wages.label('wage_master_sspl_wages')
+                ).join(
+                    WageMaster, Employee.salary_code == WageMaster.salary_code
+                ).join(
+                    Site, WageMaster.site_name == Site.site_name
+                ).filter(Site.site_id == site_id).order_by(Employee.employee_id.asc())
+            else:
+                # When getting all employees, use outer join to include employees without wage masters
+                employees_query = db.session.query(
+                    Employee.employee_id,
+                    Employee.first_name,
+                    Employee.last_name,
+                    Employee.skill_category,
+                    Employee.salary_code,
+                    Employee.wage_rate,
+                    WageMaster.base_wage.label('wage_master_base_wage'),
+                    WageMaster.sspl_wages.label('wage_master_sspl_wages')
+                ).outerjoin(
+                    WageMaster,
+                    Employee.salary_code == WageMaster.salary_code
+                ).order_by(Employee.employee_id.asc())
+
+            employees_data = employees_query.all()
+
+            if not employees_data:
+                return {'success': False, 'message': f'No employees found{" for site " + site_id if site_id else ""}'}
+
+            # Create employee lookup dictionary with wage calculation
+            employee_dict = {}
+            for emp in employees_data:
+                # Calculate regular daily wage using the same priority logic
+                if emp.wage_master_base_wage:
+                    regular_daily_wage = emp.wage_master_base_wage
+                elif emp.wage_rate:
+                    regular_daily_wage = emp.wage_rate
+                else:
+                    skill_level = emp.skill_category or 'Un-Skilled'
+                    regular_daily_wage = SalaryService.wage_map.get(skill_level, 526.0)
+
+                # Calculate SSPL daily wage
+                if emp.wage_master_sspl_wages:
+                    sspl_daily_wage = emp.wage_master_sspl_wages
+                else:
+                    skill_level = emp.skill_category or 'Un-Skilled'
+                    sspl_daily_wage = SalaryService.sspl_wage_map.get(skill_level, 550.0)
+
+                # Calculate overtime rate (based on regular wage)
+                overtime_rate_hourly = regular_daily_wage / 8
+
+                employee_dict[emp.employee_id] = {
+                    'employee_id': emp.employee_id,
+                    'name': f"{emp.first_name} {emp.last_name}",
+                    'skill_category': emp.skill_category or 'Un-Skilled',
+                    'regular_daily_wage': regular_daily_wage,
+                    'sspl_daily_wage': sspl_daily_wage,
+                    'overtime_rate_hourly': overtime_rate_hourly
+                }
+
+            employee_ids = list(employee_dict.keys())
+
+            # ============================================
+            # STEP 2: Bulk fetch ALL attendance data in ONE aggregated query
+            # ============================================
+            attendance_summary = db.session.query(
+                Attendance.employee_id,
+                func.count(case((Attendance.attendance_status == 'Present', 1))).label('present_days'),
+                func.count(case((Attendance.attendance_status == 'Absent', 1))).label('absent_days'),
+                func.coalesce(func.sum(Attendance.overtime_shifts), 0).label('total_overtime_shifts')
+            ).filter(
+                Attendance.employee_id.in_(employee_ids),
+                Attendance.attendance_date >= first_day,
+                Attendance.attendance_date <= last_day
+            ).group_by(
+                Attendance.employee_id
+            ).all()
+
+            # Create attendance lookup dictionary
+            attendance_dict = {
+                record.employee_id: {
+                    'present_days': record.present_days or 0,
+                    'absent_days': record.absent_days or 0,
+                    'total_overtime_shifts': float(record.total_overtime_shifts or 0)
+                }
+                for record in attendance_summary
+            }
+
+            # ============================================
+            # STEP 3: Bulk fetch ALL deductions in ONE query
+            # ============================================
+            all_deductions = Deduction.query.filter(
+                Deduction.employee_id.in_(employee_ids)
+            ).all()
+
+            # Group deductions by employee
+            deductions_by_employee = {}
+            for deduction in all_deductions:
+                if deduction.is_active_for_month(year, month):
+                    emp_id = deduction.employee_id
+                    if emp_id not in deductions_by_employee:
+                        deductions_by_employee[emp_id] = []
+                    deductions_by_employee[emp_id].append(deduction)
+
+            # ============================================
+            # STEP 4: Calculate SSPL salary for all employees (in-memory)
+            # ============================================
+            salary_data = []
+
+            for emp_id, emp_info in employee_dict.items():
+                # Get attendance data (default to zeros if no records)
+                attendance = attendance_dict.get(emp_id, {
+                    'present_days': 0,
+                    'absent_days': 0,
+                    'total_overtime_shifts': 0
+                })
+
+                # Calculate basic salary components using REGULAR wage
+                present_days = attendance['present_days']
+                regular_daily_wage = emp_info['regular_daily_wage']
+                basic_regular = present_days * regular_daily_wage
+
+                # Calculate statutory deductions from REGULAR basic
+                pf = round(0.12 * min(basic_regular, 15000), 2)
+                esic = round(0.0075 * min(basic_regular, 21000), 2)
+
+                # Calculate overtime (based on regular wage)
+                overtime_shifts = attendance['total_overtime_shifts']
+                overtime_hours = overtime_shifts * 8
+                overtime_allowance = round(overtime_hours * emp_info['overtime_rate_hourly'], 2)
+
+                # Get monthly deductions
+                monthly_deduction_total = 0
+                deduction_details = {}
+
+                if emp_id in deductions_by_employee:
+                    for deduction in deductions_by_employee[emp_id]:
+                        installment = deduction.get_installment_for_month(year, month)
+                        monthly_deduction_total += installment
+
+                        deduction_type = deduction.deduction_type
+                        if deduction_type in deduction_details:
+                            deduction_details[deduction_type] += installment
+                        else:
+                            deduction_details[deduction_type] = installment
+
+                # Calculate REGULAR net salary
+                total_earnings_regular = basic_regular + overtime_allowance  # Only basic + overtime for regular
+                total_deductions_regular = pf + esic + monthly_deduction_total
+                net_salary_regular = total_earnings_regular - total_deductions_regular
+
+                # Calculate SSPL components
+                sspl_daily_wage = emp_info['sspl_daily_wage']
+                basic_sspl = present_days * sspl_daily_wage
+                sspl_base_amount = basic_sspl + overtime_allowance
+
+                # Calculate Other Deduction = Net Regular - SSPL Base Amount
+                other_deduction = net_salary_regular - sspl_base_amount
+
+                # Final SSPL totals
+                total_deductions_sspl = pf + esic + other_deduction + monthly_deduction_total
+                net_salary_sspl = sspl_base_amount
+
+                # Build result dictionary
+                result = {
+                    'Employee ID': emp_id,
+                    'Employee Name': emp_info['name'],
+                    'Skill Level': emp_info['skill_category'],
+                    'Present Days': present_days,
+                    'Daily Wage': round(regular_daily_wage, 2),  # Show regular daily wage
+                    'Basic': round(basic_regular, 2),  # Regular basic
+                    'Overtime Allowance': round(overtime_allowance, 2),
+                    'Total Earnings': round(total_earnings_regular, 2),  # Regular total earnings
+                    'PF': round(pf, 2),
+                    'ESIC': round(esic, 2),
+                    'Other Deduction': round(other_deduction, 2),  # NEW: SSPL calculation
+                    'Total Deductions': round(total_deductions_sspl, 2),
+                    'Net Salary': round(net_salary_sspl, 2)  # Always equals SSPL base amount
+                }
+
+                # Add dynamic deduction details
+                for deduction_type, amount in deduction_details.items():
+                    result[deduction_type] = round(amount, 2)
+
+                salary_data.append(result)
+
+            return {
+                'success': True,
+                'message': f'SSPL salary calculated successfully for {len(salary_data)} employees.',
+                'data': salary_data
+            }
+
+        except Exception as e:
+            import traceback
+            print(traceback.format_exc())
+            return {
+                'success': False,
+                'message': 'An error occurred while generating SSPL salary data.',
+                'error': str(e)
             }
