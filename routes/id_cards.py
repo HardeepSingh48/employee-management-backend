@@ -66,9 +66,47 @@ def preview_bulk(current_user):
         print(f"DEBUG: site_id={site_id}, employee_ids={employee_ids}")
 
         query = Employee.query
-        if site_id:
-            query = query.filter(Employee.site_id == site_id)
-            print(f"DEBUG: Filtering by site_id: {site_id}")
+
+        # Handle site filtering using salary codes (matching frontend logic)
+        if site_id and site_id.strip():
+            from models.site import Site
+            from models.wage_master import WageMaster
+
+            site = Site.query.filter_by(site_id=site_id).first()
+            print(f"DEBUG: Site found: {site.site_name if site else 'None'}")
+
+            if site:
+                # Get all salary codes for this site
+                site_salary_codes = WageMaster.query.filter_by(site_name=site.site_name).all()
+                salary_code_list = [sc.salary_code for sc in site_salary_codes]
+                print(f"DEBUG: Salary codes for site: {salary_code_list}")
+
+                # Filter employees by salary codes
+                if salary_code_list:
+                    query = query.filter(Employee.salary_code.in_(salary_code_list))
+                    print(f"DEBUG: Applied salary code filter: {salary_code_list}")
+                else:
+                    # No salary codes found for this site, return empty
+                    print("DEBUG: No salary codes found for site, returning empty")
+                    return jsonify({
+                        "success": True,
+                        "data": {
+                            "count": 0,
+                            "employees": []
+                        }
+                    }), 200
+            else:
+                # Site not found, return empty
+                print("DEBUG: Site not found, returning empty")
+                return jsonify({
+                    "success": True,
+                    "data": {
+                        "count": 0,
+                        "employees": []
+                    }
+                }), 200
+
+        # Handle custom employee selection
         if employee_ids:
             query = query.filter(Employee.employee_id.in_(employee_ids))
             print(f"DEBUG: Filtering by employee_ids: {employee_ids}")
@@ -82,6 +120,8 @@ def preview_bulk(current_user):
         return jsonify({"success": True, "data": {"count": len(previews), "employees": previews}}), 200
     except Exception as e:
         print(f"DEBUG: Error in preview_bulk: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return jsonify({"success": False, "message": str(e)}), 500
 
 
@@ -334,17 +374,49 @@ def generate_bulk(current_user):
         employee_ids = data.get("employee_ids") or []
         site_id = data.get("site_id")
 
+        print(f"DEBUG: generate_bulk - mode={mode}, site_id={site_id}, employee_ids={employee_ids}")
+
         query = Employee.query
+
+        # Handle site mode with salary code filtering
         if mode == "site" and site_id:
-            query = query.filter(Employee.site_id == site_id)
+            from models.site import Site
+            from models.wage_master import WageMaster
+
+            site = Site.query.filter_by(site_id=site_id).first()
+            print(f"DEBUG: Site found: {site.site_name if site else 'None'}")
+
+            if site:
+                # Get all salary codes for this site
+                site_salary_codes = WageMaster.query.filter_by(site_name=site.site_name).all()
+                salary_code_list = [sc.salary_code for sc in site_salary_codes]
+                print(f"DEBUG: Salary codes for site: {salary_code_list}")
+
+                # Filter employees by salary codes
+                if salary_code_list:
+                    query = query.filter(Employee.salary_code.in_(salary_code_list))
+                    print(f"DEBUG: Applied salary code filter: {salary_code_list}")
+                else:
+                    return jsonify({
+                        "success": False,
+                        "message": "No employees found for this site"
+                    }), 404
+            else:
+                return jsonify({
+                    "success": False,
+                    "message": "Site not found"
+                }), 404
         elif mode == "custom" and employee_ids:
             query = query.filter(Employee.employee_id.in_(employee_ids))
-        # For mode == "all", don't apply any filters
 
         employees = query.all()
+        print(f"DEBUG: Found {len(employees)} employees for PDF generation")
 
         if not employees:
-            return jsonify({"success": False, "message": "No employees found for selection"}), 404
+            return jsonify({
+                "success": False,
+                "message": "No employees found for selection"
+            }), 404
 
         cards = [_employee_to_preview(e) for e in employees]
         pdf_buffer = _generate_pdf(cards)
@@ -358,6 +430,9 @@ def generate_bulk(current_user):
             download_name=filename,
         )
     except Exception as e:
+        print(f"Error in generate_bulk: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return jsonify({"success": False, "message": str(e)}), 500
 
 
