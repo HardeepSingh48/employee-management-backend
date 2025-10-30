@@ -19,7 +19,8 @@ cffi==1.16.0
 cairocffi==1.6.1
 
 # PDF generation (fallback)
-reportlab==4.0.4
+reportlab==4.0.7
+PyPDF2==3.0.1
 
 # HTML parsing (for PDF service)
 beautifulsoup4==4.12.2
