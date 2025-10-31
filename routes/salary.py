@@ -115,6 +115,68 @@ def calculate_monthly_salary_sspl():
             "message": f"Error calculating SSPL monthly salary: {str(e)}"
         }), 500
 
+@salary_bp.route("/form-b-sspl", methods=["POST"])
+def form_b_sspl():
+    """
+    Generate SSPL Form B salary data for selected employees
+    Body: { employee_ids: string[], year: number, month: number }
+    """
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"success": False, "message": "No data provided"}), 400
+
+        employee_ids = data.get('employee_ids') or []
+        year = data.get('year')
+        month = data.get('month')
+
+        if not year or not month or not isinstance(employee_ids, list) or not employee_ids:
+            return jsonify({
+                "success": False,
+                "message": "employee_ids (array), year and month are required"
+            }), 400
+
+        result = SalaryService.generate_form_b_salary_data_sspl(employee_ids, int(year), int(month))
+
+        status = 200 if result.get('success') else 400
+        return jsonify(result), status
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "message": f"Error generating SSPL Form B: {str(e)}"
+        }), 500
+
+@salary_bp.route("/payroll-sspl", methods=["POST"])
+def payroll_sspl_preview():
+    """
+    OPTIMIZED: Bulk SSPL preview salaries for selected employees
+    Body: { employee_ids: string[], year: number, month: number }
+    Returns: { employee_id: salary_data }
+    """
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"success": False, "message": "No data provided"}), 400
+
+        employee_ids = data.get('employee_ids') or []
+        year = data.get('year')
+        month = data.get('month')
+
+        if not year or not month or not isinstance(employee_ids, list) or not employee_ids:
+            return jsonify({
+                "success": False,
+                "message": "employee_ids (array), year and month are required"
+            }), 400
+
+        result = SalaryService.calculate_bulk_preview_salaries_sspl(employee_ids, int(year), int(month))
+        status = 200 if result.get('success') else 400
+        return jsonify(result), status
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "message": f"Error generating SSPL payroll preview: {str(e)}"
+        }), 500
+
 @salary_bp.route("/calculate-individual", methods=["POST"])
 def calculate_individual_salary():
     """

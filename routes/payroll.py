@@ -975,6 +975,111 @@ def generate_payroll(current_user):
     except Exception as e:
         return jsonify({'success': False, 'message': 'Error generating payroll', 'error': str(e)}), 500
 
+@payroll_bp.route('/generate-sspl', methods=['POST'])
+@token_required
+@require_admin_or_supervisor
+def generate_payroll_sspl(current_user):
+    """Generate and download SSPL payroll PDF using SSPL calculations"""
+    try:
+        import time
+        start_time = time.time()
+
+        data = request.get_json()
+        employee_ids = data.get('employee_ids') or []
+        year = data.get('year')
+        month = data.get('month')
+
+        if not employee_ids:
+            return jsonify({'success': False, 'message': 'No employees selected'}), 400
+        if not year or not month:
+            return jsonify({'success': False, 'message': 'Year and month are required'}), 400
+
+        year = int(year)
+        month = int(month)
+
+        # Default filename as requested
+        month_names = ['', 'January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+        filename = data.get('filename', f"Payslips_Special_Wages_{month_names[month]}_{year}.pdf")
+
+        # Bulk SSPL calculation
+        bulk_start = time.time()
+        bulk_result = SalaryService.calculate_bulk_preview_salaries_sspl(employee_ids, year, month)
+        bulk_time = time.time() - bulk_start
+
+        if not bulk_result.get('success'):
+            return jsonify({'success': False, 'message': bulk_result.get('message', 'SSPL calculation failed')}), 500
+
+        salary_data_dict = bulk_result['data']
+
+        # Build HTML
+        html_start = time.time()
+        html_content = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <title>Payslips - SSPL {len(employee_ids)} employees</title>
+            {generate_payslips_css()}
+        </head>
+        <body>
+        """
+
+        successful_payslips = 0
+        failed_payslips = 0
+        for emp_id in employee_ids:
+            try:
+                if emp_id in salary_data_dict:
+                    payslip_html = generate_payslip_html_from_data(salary_data_dict[emp_id])
+                    html_content += payslip_html
+                    successful_payslips += 1
+                else:
+                    html_content += f"<div>Error: No SSPL salary data for employee {emp_id}</div>"
+                    failed_payslips += 1
+            except Exception as emp_error:
+                print(f"SSPL payslip error for {emp_id}: {str(emp_error)}")
+                failed_payslips += 1
+
+        html_content += """
+        </body>
+        </html>
+        """
+        html_time = time.time() - html_start
+
+        if PDF_GENERATOR is None:
+            response = make_response(html_content)
+            response.headers['Content-Type'] = 'text/html'
+            response.headers['Content-Disposition'] = f'attachment; filename="{filename.replace('.pdf', '.html')}"'
+            return response
+
+        pdf_start = time.time()
+        try:
+            pdf_path = generate_pdf_from_html(html_content, filename)
+            pdf_time = time.time() - pdf_start
+            total_time = time.time() - start_time
+
+            response = send_file(
+                pdf_path,
+                as_attachment=True,
+                download_name=filename,
+                mimetype='application/pdf'
+            )
+            response.headers['X-Performance-Bulk-SSPL'] = f'{bulk_time:.3f}s'
+            response.headers['X-Performance-HTML-Generation'] = f'{html_time:.3f}s'
+            response.headers['X-Performance-PDF-Generation'] = f'{pdf_time:.3f}s'
+            response.headers['X-Performance-Total'] = f'{total_time:.3f}s'
+            response.headers['X-Payslips-Successful'] = str(successful_payslips)
+            response.headers['X-Payslips-Failed'] = str(failed_payslips)
+            return response
+        except Exception as pdf_error:
+            print(f"SSPL PDF generation error: {str(pdf_error)}")
+            response = make_response(html_content)
+            response.headers['Content-Type'] = 'text/html'
+            response.headers['Content-Disposition'] = f'attachment; filename="{filename.replace('.pdf', '.html')}"'
+            return response
+
+    except Exception as e:
+        return jsonify({'success': False, 'message': 'Error generating SSPL payroll', 'error': str(e)}), 500
+
 @payroll_bp.route('/employees', methods=['GET'])
 @token_required
 @require_admin_or_supervisor

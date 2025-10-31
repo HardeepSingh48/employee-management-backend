@@ -233,6 +233,164 @@ def get_form_b_data():
             "message": f"Error generating Form B data: {str(e)}"
         }), 500
 
+@forms_bp.route("/form-b-special-wages", methods=["POST", "OPTIONS"])
+def get_form_b_special_wages():
+    """
+    Get Form B data using SSPL calculation in the exact Form B structure
+    Adds 'otherDeduction' field inside deductions and totals
+    """
+    if request.method == 'OPTIONS':
+        return '', 200
+
+    try:
+        data = request.get_json() or {}
+        year = int(data.get('year')) if data.get('year') is not None else None
+        month = int(data.get('month')) if data.get('month') is not None else None
+        site = data.get('site')
+
+        if not year or not month:
+            return jsonify({
+                "success": False,
+                "message": "Year and month are required"
+            }), 400
+
+        # Use SSPL monthly generator (with optional site filtering via site_id not supported here)
+        # For Form B, we mirror how regular Form B is built: filter employees by site name, then compute SSPL for them
+        query = Employee.query
+        if site and site != 'all':
+            from urllib.parse import unquote
+            decoded_site = unquote(site)
+            query = query.join(WageMaster, Employee.salary_code == WageMaster.salary_code) \
+                         .filter(WageMaster.site_name == decoded_site)
+
+        employees = query.order_by(Employee.employee_id.asc()).all()
+        if not employees:
+            return jsonify({"success": True, "data": [], "totals": { 
+                "totalEmployees": 0,
+                "totalDaysWorked": 0,
+                "totalOvertime": 0,
+                "totalEarnings": 0,
+                "totalDeductions": 0,
+                "totalOtherDeduction": 0,
+                "totalOtherRecoveries": 0,
+                "totalNetPayable": 0
+            } }), 200
+
+        employee_ids = [emp.employee_id for emp in employees]
+
+        # Reuse SSPL calc for given employees using the service we already implemented for site/all
+        sspl_bulk = SalaryService.generate_monthly_salary_data_sspl(year, month, None)
+        if not sspl_bulk.get('success'):
+            return jsonify(sspl_bulk), 400
+
+        sspl_rows = { r['Employee ID']: r for r in sspl_bulk['data'] if r['Employee ID'] in employee_ids }
+
+        # Build wage master lookup for site names if needed in display
+        wage_master_query = WageMaster.query.filter(
+            WageMaster.salary_code.in_([emp.salary_code for emp in employees if emp.salary_code])
+        ).all()
+        wage_master_dict = {wm.salary_code: wm for wm in wage_master_query}
+
+        form_b_data = []
+        total_days_worked = 0
+        total_overtime = 0
+        total_earnings = 0
+        total_deductions = 0
+        total_other_recoveries = 0
+        total_other_deduction = 0
+        total_net_payable = 0
+
+        for idx, employee in enumerate(employees, 1):
+            s = sspl_rows.get(employee.employee_id)
+            if not s:
+                continue
+            wage_master = wage_master_dict.get(employee.salary_code)
+
+            present_days = s.get('Present Days', 0)
+            overtime_allowance = s.get('Overtime Allowance', 0)
+            # If available, use Overtime Shifts to compute days, else derive from allowance/rate
+            overtime_shifts = s.get('Overtime Shifts')
+            if overtime_shifts is not None:
+                overtime_hours = float(overtime_shifts) * 8
+            else:
+                overtime_hours = 0
+
+            total_days = present_days + (overtime_hours / 8)
+
+            form_b_row = {
+                "slNo": idx,
+                "employeeCode": employee.employee_id,
+                "employeeName": f"{employee.first_name} {employee.last_name}",
+                "designation": employee.skill_category or "N/A",
+                "rateOfWage": {
+                    "bs": s.get('Daily Wage', 0),
+                    "da": 0
+                },
+                "daysWorked": present_days,
+                "overtime": (overtime_hours / 8),
+                "totalDays": total_days,
+                "grossEarnings": {
+                    "bs": s.get('Basic', 0),
+                    "da": s.get('DA', 0) or 0,
+                    "hra": s.get('HRA', 0) or 0,
+                    "cov": 0,
+                    "ota": overtime_allowance,
+                    "ae": s.get('Others', 0) or 0
+                },
+                "totalEarnings": s.get('Total Earnings', 0),
+                "deductions": {
+                    "pf": s.get('PF', 0),
+                    "esi": s.get('ESIC', 0),
+                    "cit": s.get('Income Tax', 0) or 0,
+                    "ptax": 0,
+                    "adv": 0,
+                    "otherDeduction": s.get('Other Deduction', 0) or 0,
+                    "otherRecoveries": s.get('Others Recoveries', 0) or 0,
+                    "total": s.get('Total Deductions', 0)
+                },
+                "netPayable": s.get('Net Salary', 0),
+                "siteName": wage_master.site_name if wage_master else "N/A"
+            }
+
+            form_b_data.append(form_b_row)
+
+            total_days_worked += form_b_row["daysWorked"]
+            total_overtime += form_b_row["overtime"]
+            total_earnings += form_b_row["totalEarnings"]
+            total_deductions += form_b_row["deductions"]["total"]
+            total_other_recoveries += form_b_row["deductions"]["otherRecoveries"] or 0
+            total_other_deduction += form_b_row["deductions"].get("otherDeduction", 0) or 0
+            total_net_payable += form_b_row["netPayable"]
+
+        totals = {
+            "totalEmployees": len(form_b_data),
+            "totalDaysWorked": total_days_worked,
+            "totalOvertime": total_overtime,
+            "totalEarnings": total_earnings,
+            "totalDeductions": total_deductions,
+            "totalOtherDeduction": total_other_deduction,
+            "totalOtherRecoveries": total_other_recoveries,
+            "totalNetPayable": total_net_payable
+        }
+
+        return jsonify({
+            "success": True,
+            "data": form_b_data,
+            "totals": totals,
+            "filters": {
+                "year": year,
+                "month": month,
+                "site": site,
+                "monthName": calendar.month_name[month]
+            }
+        }), 200
+
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "message": f"Error getting Form B special wages: {str(e)}"
+        }), 500
+
 
 @forms_bp.route("/form-b/download", methods=["GET", "OPTIONS"])
 def download_form_b_excel():
