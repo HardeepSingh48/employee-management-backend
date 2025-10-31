@@ -975,6 +975,69 @@ def generate_payroll(current_user):
     except Exception as e:
         return jsonify({'success': False, 'message': 'Error generating payroll', 'error': str(e)}), 500
 
+@payroll_bp.route('/preview-sspl', methods=['GET'])
+@token_required
+@require_admin_or_supervisor
+def preview_payroll_sspl(current_user):
+    """Preview SSPL payroll for selected employees using bulk calculations"""
+    try:
+        import time
+        start_time = time.time()
+
+        # Parse params
+        employee_ids_param = request.args.get('employee_ids', '')
+        employee_ids = [int(x.strip()) for x in employee_ids_param.split(',') if x.strip().isdigit()]
+        year = request.args.get('year', type=int)
+        month = request.args.get('month', type=int)
+
+        if not employee_ids:
+            return jsonify({'success': False, 'message': 'No valid employee IDs provided'}), 400
+        if not year or not month:
+            return jsonify({'success': False, 'message': 'Year and month are required'}), 400
+
+        preview_employee_ids = employee_ids[:3]
+
+        # Bulk SSPL calculation for preview employees
+        bulk_result = SalaryService.calculate_bulk_preview_salaries_sspl(preview_employee_ids, year, month)
+        if not bulk_result.get('success'):
+            return jsonify({'success': False, 'message': bulk_result.get('message', 'SSPL calculation failed')}), 500
+
+        salary_data_dict = bulk_result['data']
+
+        # Generate preview HTML (iframe-ready)
+        html_content = f"""
+        {generate_payslips_css()}
+        <body>
+        """
+
+        for emp_id in preview_employee_ids:
+            try:
+                if emp_id in salary_data_dict:
+                    payslip_html = generate_payslip_html_from_data(salary_data_dict[emp_id])
+                    html_content += payslip_html
+                else:
+                    html_content += f"<div>Error: No SSPL salary data found for employee {emp_id}</div>"
+            except Exception as emp_error:
+                print(f"Error generating SSPL payslip for employee {emp_id}: {str(emp_error)}")
+                html_content += f"<div>Error generating SSPL payslip for employee {emp_id}: {str(emp_error)}</div>"
+
+        html_content += "</body>"
+
+        execution_time = time.time() - start_time
+
+        return jsonify({
+            'success': True,
+            'data': {
+                'preview_html': html_content,
+                'total_employees': len(employee_ids),
+                'preview_count': len(preview_employee_ids)
+            },
+            'message': f'SSPL preview generated successfully in {execution_time:.2f}s'
+        })
+
+    except Exception as e:
+        return jsonify({'success': False, 'message': 'Error generating SSPL preview', 'error': str(e)}), 500
+
 @payroll_bp.route('/generate-sspl', methods=['POST'])
 @token_required
 @require_admin_or_supervisor
