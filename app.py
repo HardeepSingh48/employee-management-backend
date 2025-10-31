@@ -8,6 +8,7 @@ from config import (
     SECRET_KEY,
     CORS_ORIGINS,
     ADDITIONAL_CORS_ORIGINS,
+    COOLIFY_FQDN,  # IMPORT THIS!
 )
 from models import db
 import os
@@ -24,14 +25,15 @@ def create_app(register_blueprints: bool = True):
     # Disable strict slashes to avoid redirect issues with CORS
     app.url_map.strict_slashes = False
 
-    # Enable CORS for all routes with specific configuration
-    # Allow your frontend domain in production and development
+    # Build allowed origins list
     allowed_origins = [
         "http://localhost:3000",
         "http://localhost:3001",
         "http://127.0.0.1:3000",
         "http://127.0.0.1:3001",
         "https://employee-management-frontend-kohl-eight.vercel.app",
+        "https://ssplsecurity.in",
+        "https://api.ssplsecurity.in",  # Add your API domain explicitly
     ]
 
     # Add production origins from config
@@ -41,10 +43,17 @@ def create_app(register_blueprints: bool = True):
     # Add additional origins from environment variable if set
     if ADDITIONAL_CORS_ORIGINS:
         allowed_origins.extend([origin.strip() for origin in ADDITIONAL_CORS_ORIGINS.split(",") if origin.strip()])
+    
+    # Add Coolify FQDN if present
+    if COOLIFY_FQDN:
+        allowed_origins.append(COOLIFY_FQDN)
+
+    # Remove duplicates while preserving order
+    allowed_origins = list(dict.fromkeys(allowed_origins))
 
     print(f"CORS allowed origins: {allowed_origins}")
 
-    # Configure CORS with enhanced settings for development/testing
+    # Configure CORS with enhanced settings
     CORS(app,
          origins=allowed_origins,
          methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
@@ -56,39 +65,32 @@ def create_app(register_blueprints: bool = True):
              "Origin",
              "Access-Control-Allow-Origin",
              "X-CSRF-Token",
-             "X-Requested-With"
          ],
          supports_credentials=True,
          expose_headers=["Content-Type", "Authorization", "X-Total-Count"],
          send_wildcard=False,
          automatic_options=True,
-         max_age=86400)  # Cache preflight for 24 hours
+         max_age=86400)
 
-    # Add explicit CORS headers as fallback for production
+    # Simplified CORS headers handler
     @app.after_request
     def add_cors_headers(response):
         origin = request.headers.get('Origin')
-
-        # Check if origin is in allowed origins (including Coolify auto-detected)
-        if origin and origin in allowed_origins:
+        
+        # If origin is in allowed list, set it
+        if origin in allowed_origins:
             response.headers['Access-Control-Allow-Origin'] = origin
-        elif origin and any(origin.startswith(allowed) for allowed in allowed_origins if allowed.endswith('.coolify.io') or allowed == origin):
-            # Special handling for Coolify domains
-            response.headers['Access-Control-Allow-Origin'] = origin
-        else:
-            # For production, allow the specific domain or Coolify FQDN
-            if COOLIFY_FQDN and origin == COOLIFY_FQDN:
-                response.headers['Access-Control-Allow-Origin'] = COOLIFY_FQDN
-            else:
-                response.headers['Access-Control-Allow-Origin'] = 'https://ssplsecurity.in'
-
+        # Fallback for production
+        elif not origin:
+            response.headers['Access-Control-Allow-Origin'] = 'https://ssplsecurity.in'
+        
         response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS, PATCH'
         response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With, Accept, Origin, X-CSRF-Token'
         response.headers['Access-Control-Allow-Credentials'] = 'true'
         response.headers['Access-Control-Max-Age'] = '86400'
 
-        # Log CORS headers for debugging in production
-        if os.getenv("FLASK_ENV") == "production":
+        # Debug logging
+        if os.getenv("FLASK_ENV") == "production" or os.getenv("DEBUG_CORS") == "true":
             print(f"CORS Debug - Origin: {origin}, Allowed: {response.headers.get('Access-Control-Allow-Origin')}")
 
         return response
@@ -98,28 +100,26 @@ def create_app(register_blueprints: bool = True):
     app.config["MAX_CONTENT_LENGTH"] = MAX_CONTENT_LENGTH
     app.config["SECRET_KEY"] = SECRET_KEY
 
-    # SQLAlchemy Connection Pooling Configuration for Performance (Optimized for Bulk Operations)
+    # SQLAlchemy Connection Pooling Configuration
     app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
-        'pool_size': 30,          # Increased for bulk operations
-        'max_overflow': 50,       # More overflow connections for peak loads
-        'pool_pre_ping': True,    # Test connections before using them
-        'pool_recycle': 1800,     # Recycle connections after 30 minutes (reduced for bulk ops)
-        'pool_timeout': 60,       # Increased timeout for bulk operations
-        'echo': False             # Set to True for SQL query logging in development
+        'pool_size': 30,
+        'max_overflow': 50,
+        'pool_pre_ping': True,
+        'pool_recycle': 1800,
+        'pool_timeout': 60,
+        'echo': False
     }
 
     # Ensure uploads dir exists
     os.makedirs(UPLOADS_DIR, exist_ok=True)
 
     db.init_app(app)
-
     migrate = Migrate(app, db)
 
-    # Optionally seed demo users in production by setting SEED_DEMO_USERS=true
+    # Demo users seeding
     if os.getenv("SEED_DEMO_USERS", "").lower() == "true":
         with app.app_context():
             try:
-                # Admin user
                 admin = User.query.filter_by(email="admin@company.com").first()
                 if not admin:
                     admin = User(
@@ -129,13 +129,11 @@ def create_app(register_blueprints: bool = True):
                         created_by="system"
                     )
                     admin.set_password("admin123")
-                    admin.set_permissions(["all"])  # full access
+                    admin.set_permissions(["all"])
                     db.session.add(admin)
 
-                # Employee user and minimal employee profile
                 employee_user = User.query.filter_by(email="employee@company.com").first()
                 if not employee_user:
-                    # Ensure an employee record exists
                     demo_employee_id = "EMPDEMO001"
                     employee = Employee.query.filter_by(employee_id=demo_employee_id).first()
                     if not employee:
@@ -163,16 +161,14 @@ def create_app(register_blueprints: bool = True):
 
                 db.session.commit()
             except Exception as seed_err:
-                # Do not crash app on seed errors; log and continue
                 try:
                     db.session.rollback()
                 except Exception:
                     pass
                 print(f"[WARN] Demo user seeding failed: {seed_err}")
 
-    # Register all blueprints (optional for scripts)
+    # Register blueprints
     if register_blueprints:
-        # Import lazily to avoid importing heavy dependencies when not needed
         from routes.auth import auth_bp
         from routes.employee_dashboard import employee_dashboard_bp
         from routes.employees import employees_bp
@@ -200,7 +196,6 @@ def create_app(register_blueprints: bool = True):
         app.register_blueprint(id_cards_bp, url_prefix="/api/id-cards")
         app.register_blueprint(superadmin_bp, url_prefix="/api")
 
-    # Add a simple root route for testing
     @app.route("/")
     def home():
         return {
@@ -218,24 +213,19 @@ def create_app(register_blueprints: bool = True):
             }
         }
 
-    # Add health check route
     @app.route("/health")
     def health_check():
         return {"status": "healthy", "timestamp": datetime.now().isoformat()}
 
     return app
 
-# Create the WSGI app when importing this module (needed for gunicorn),
-# but allow scripts to disable this by setting CREATE_APP_ON_IMPORT=0
 if os.getenv("CREATE_APP_ON_IMPORT", "1") not in ("0", "false", "False"):
     app = create_app()
 
 if __name__ == "__main__":
-    # For local development
     port = int(os.environ.get("PORT", 5000))
     debug = os.environ.get("FLASK_ENV") != "production"
 
-    # Ensure app exists even if CREATE_APP_ON_IMPORT disabled
     try:
         app
     except NameError:
