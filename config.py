@@ -33,3 +33,15 @@ ALLOWED_EXTENSIONS = {"jpeg", "jpg", "png", "pdf", "doc", "docx", "xlsx", "xls"}
 # CORS configuration for production
 CORS_ORIGINS = os.getenv("CORS_ORIGINS", "https://ssplsecurity.in,https://api.ssplsecurity.in")
 ADDITIONAL_CORS_ORIGINS = os.getenv("ADDITIONAL_CORS_ORIGINS", "")
+
+# Coolify-specific environment variables
+COOLIFY_URL = os.getenv("COOLIFY_URL")
+COOLIFY_FQDN = os.getenv("COOLIFY_FQDN")
+
+# Auto-detect Coolify deployment and add to CORS origins
+if COOLIFY_FQDN:
+    # Add Coolify FQDN if not already in CORS_ORIGINS
+    coolify_origins = [origin.strip() for origin in CORS_ORIGINS.split(",") if origin.strip()]
+    if COOLIFY_FQDN not in coolify_origins:
+        coolify_origins.append(COOLIFY_FQDN)
+        CORS_ORIGINS = ",".join(coolify_origins)

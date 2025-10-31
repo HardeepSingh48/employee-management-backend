@@ -68,16 +68,29 @@ def create_app(register_blueprints: bool = True):
     @app.after_request
     def add_cors_headers(response):
         origin = request.headers.get('Origin')
-        if origin in allowed_origins:
+
+        # Check if origin is in allowed origins (including Coolify auto-detected)
+        if origin and origin in allowed_origins:
+            response.headers['Access-Control-Allow-Origin'] = origin
+        elif origin and any(origin.startswith(allowed) for allowed in allowed_origins if allowed.endswith('.coolify.io') or allowed == origin):
+            # Special handling for Coolify domains
             response.headers['Access-Control-Allow-Origin'] = origin
         else:
-            # For production, allow the specific domain
-            response.headers['Access-Control-Allow-Origin'] = 'https://ssplsecurity.in'
+            # For production, allow the specific domain or Coolify FQDN
+            if COOLIFY_FQDN and origin == COOLIFY_FQDN:
+                response.headers['Access-Control-Allow-Origin'] = COOLIFY_FQDN
+            else:
+                response.headers['Access-Control-Allow-Origin'] = 'https://ssplsecurity.in'
 
         response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS, PATCH'
-        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With, Accept, Origin'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With, Accept, Origin, X-CSRF-Token'
         response.headers['Access-Control-Allow-Credentials'] = 'true'
         response.headers['Access-Control-Max-Age'] = '86400'
+
+        # Log CORS headers for debugging in production
+        if os.getenv("FLASK_ENV") == "production":
+            print(f"CORS Debug - Origin: {origin}, Allowed: {response.headers.get('Access-Control-Allow-Origin')}")
+
         return response
     
     app.config["SQLALCHEMY_DATABASE_URI"] = SQLALCHEMY_DATABASE_URI
