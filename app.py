@@ -6,6 +6,8 @@ from config import (
     SQLALCHEMY_TRACK_MODIFICATIONS,
     MAX_CONTENT_LENGTH,
     SECRET_KEY,
+    CORS_ORIGINS,
+    ADDITIONAL_CORS_ORIGINS,
 )
 from models import db
 import os
@@ -30,13 +32,15 @@ def create_app(register_blueprints: bool = True):
         "http://127.0.0.1:3000",
         "http://127.0.0.1:3001",
         "https://employee-management-frontend-kohl-eight.vercel.app",
-        "https://ssplsecurity.in"
     ]
 
+    # Add production origins from config
+    if CORS_ORIGINS:
+        allowed_origins.extend([origin.strip() for origin in CORS_ORIGINS.split(",") if origin.strip()])
+
     # Add additional origins from environment variable if set
-    additional_origins = os.getenv("ADDITIONAL_CORS_ORIGINS", "")
-    if additional_origins:
-        allowed_origins.extend([origin.strip() for origin in additional_origins.split(",") if origin.strip()])
+    if ADDITIONAL_CORS_ORIGINS:
+        allowed_origins.extend([origin.strip() for origin in ADDITIONAL_CORS_ORIGINS.split(",") if origin.strip()])
 
     print(f"CORS allowed origins: {allowed_origins}")
 
@@ -59,6 +63,22 @@ def create_app(register_blueprints: bool = True):
          send_wildcard=False,
          automatic_options=True,
          max_age=86400)  # Cache preflight for 24 hours
+
+    # Add explicit CORS headers as fallback for production
+    @app.after_request
+    def add_cors_headers(response):
+        origin = request.headers.get('Origin')
+        if origin in allowed_origins:
+            response.headers['Access-Control-Allow-Origin'] = origin
+        else:
+            # For production, allow the specific domain
+            response.headers['Access-Control-Allow-Origin'] = 'https://ssplsecurity.in'
+
+        response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS, PATCH'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With, Accept, Origin'
+        response.headers['Access-Control-Allow-Credentials'] = 'true'
+        response.headers['Access-Control-Max-Age'] = '86400'
+        return response
     
     app.config["SQLALCHEMY_DATABASE_URI"] = SQLALCHEMY_DATABASE_URI
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = SQLALCHEMY_TRACK_MODIFICATIONS

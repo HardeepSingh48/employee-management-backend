@@ -29,3 +29,7 @@ SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-change-in-production")
 UPLOADS_DIR = os.getenv("UPLOADS_DIR", "uploads/employees")
 MAX_CONTENT_LENGTH = 10 * 1024 * 1024  # 10 MB
 ALLOWED_EXTENSIONS = {"jpeg", "jpg", "png", "pdf", "doc", "docx", "xlsx", "xls"}
+
+# CORS configuration for production
+CORS_ORIGINS = os.getenv("CORS_ORIGINS", "https://ssplsecurity.in,https://api.ssplsecurity.in")
+ADDITIONAL_CORS_ORIGINS = os.getenv("ADDITIONAL_CORS_ORIGINS", "")
