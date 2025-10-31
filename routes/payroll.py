@@ -939,7 +939,8 @@ def generate_payroll(current_user):
             # Return HTML as fallback
             response = make_response(html_content)
             response.headers['Content-Type'] = 'text/html'
-            response.headers['Content-Disposition'] = f'attachment; filename="{filename.replace(".pdf", ".html")}"'
+            new_filename = filename.replace('.pdf', '.html')
+            response.headers['Content-Disposition'] = f'attachment; filename="{new_filename}"'
             return response
 
         # Generate PDF with better error handling
@@ -973,7 +974,8 @@ def generate_payroll(current_user):
             # Return HTML as fallback
             response = make_response(html_content)
             response.headers['Content-Type'] = 'text/html'
-            response.headers['Content-Disposition'] = f'attachment; filename="{filename.replace(".pdf", ".html")}"'
+            new_filename = filename.replace('.pdf', '.html')
+            response.headers['Content-Disposition'] = f'attachment; filename="{new_filename}"'
             return response
 
     except Exception as e:
@@ -1115,7 +1117,8 @@ def generate_payroll_sspl(current_user):
         if PDF_GENERATOR is None:
             response = make_response(html_content)
             response.headers['Content-Type'] = 'text/html'
-            response.headers['Content-Disposition'] = f'attachment; filename="{filename.replace('.pdf', '.html')}"'
+            new_filename = filename.replace('.pdf', '.html')
+            response.headers['Content-Disposition'] = f'attachment; filename="{new_filename}"'
             return response
 
         pdf_start = time.time()
@@ -1141,7 +1144,8 @@ def generate_payroll_sspl(current_user):
             print(f"SSPL PDF generation error: {str(pdf_error)}")
             response = make_response(html_content)
             response.headers['Content-Type'] = 'text/html'
-            response.headers['Content-Disposition'] = f'attachment; filename="{filename.replace('.pdf', '.html')}"'
+            new_filename = filename.replace('.pdf', '.html')
+            response.headers['Content-Disposition'] = f'attachment; filename="{new_filename}"'
             return response
 
     except Exception as e:
