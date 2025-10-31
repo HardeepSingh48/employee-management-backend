@@ -1442,7 +1442,7 @@ class SalaryService:
                     'Net Salary': round(net_salary_sspl, 2)  # Always equals SSPL base amount
                 }
 
-                # Add dynamic deduction details
+                # Add dynamic deduction details (Uniform, Miscellaneous, etc.)
                 for deduction_type, amount in deduction_details.items():
                     result[deduction_type] = round(amount, 2)
 
@@ -1739,6 +1739,13 @@ class SalaryService:
                     'Total Deductions': round(total_deductions_final, 2),
                     'Net Salary': round(net_salary_final, 2),
                 }
+
+                # Add dynamic deduction details (Uniform, Miscellaneous, etc.)
+                if emp_id in deductions_by_employee:
+                    for d in deductions_by_employee[emp_id]:
+                        deduction_type = d.deduction_type
+                        amount = d.get_installment_for_month(year, month)
+                        salary_data_dict[emp_id][deduction_type] = round(amount, 2)
 
             return {'success': True, 'data': salary_data_dict}
 

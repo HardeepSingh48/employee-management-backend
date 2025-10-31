@@ -375,13 +375,17 @@ def generate_payslip_html_from_data(salary_data):
         if float(salary_data.get('Others Recoveries', 0)) > 0:
             deductions.append(('Other Rec', salary_data.get('Others Recoveries', 0)))
 
+        # SSPL: Explicitly include Other Deduction if present
+        if float(salary_data.get('Other Deduction', 0)) > 0:
+            deductions.append(('Other Ded', salary_data.get('Other Deduction', 0)))
+
         # Add dynamic deductions from the deductions module (with shorter names)
         # Exclude overtime-related fields that are not deductions
         overtime_fields_to_exclude = ['Overtime Shifts', 'Overtime Hours', 'Overtime Rate Hourly']
         for key, value in salary_data.items():
             if key not in ['Employee ID', 'Employee Name', 'Skill Level', 'Present Days', 'Daily Wage',
                           'Basic', 'Special Basic', 'DA', 'HRA', 'Overtime', 'Overtime Allowance', 'Others', 'Total Earnings',
-                          'PF', 'ESIC', 'Society', 'Income Tax', 'Insurance', 'Others Recoveries',
+                          'PF', 'ESIC', 'Society', 'Income Tax', 'Insurance', 'Others Recoveries', 'Other Deduction',
                           'Total Deductions', 'Net Salary'] + overtime_fields_to_exclude and float(value) > 0:
                 # Truncate long names for better fit
                 short_name = key[:10] + "..." if len(key) > 10 else key
