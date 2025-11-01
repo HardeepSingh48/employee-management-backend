@@ -128,33 +128,38 @@ def preview_bulk(current_user):
 def _draw_logo(c, x, y, size_mm=12):
     logo_size = size_mm * mm
 
-    # Try multiple possible logo paths (frontend/public first)
-    possible_paths = [
-        # Common Next.js public paths in this repo
-        os.path.abspath(os.path.join(current_app.root_path, "..", "employee-management", "public", "sspl_logo.png")),
-        os.path.abspath(os.path.join(current_app.root_path, "..", "employee-management", "public", "assets", "SSPL.png")),
-        os.path.abspath(os.path.join(current_app.root_path, "..", "public", "sspl_logo.png")),
-        os.path.abspath(os.path.join(current_app.root_path, "static", "sspl_logo.png")),
-    ]
+    # Hardcoded absolute path to the logo (most reliable approach)
+    logo_path = r"E:\Projects\emp-management-system\employee-management\public\assets\SSPL.png"
 
-    for logo_path in possible_paths:
-        if os.path.exists(logo_path):
-            try:
-                c.drawImage(
-                    logo_path,
-                    x,
-                    y,
-                    width=logo_size,
-                    height=logo_size,
-                    preserveAspectRatio=True,
-                    mask='auto',
-                )
-                return True
-            except Exception as e:
-                print(f"Failed to load logo from {logo_path}: {e}")
-                continue
+    print(f"DEBUG: Using hardcoded logo path: {logo_path}")
+    print(f"DEBUG: Logo file exists: {os.path.exists(logo_path)}")
+
+    if os.path.exists(logo_path):
+        try:
+            # Try to open and validate the image first
+            from PIL import Image
+            img = Image.open(logo_path)
+            print(f"DEBUG: PIL opened image successfully: {img.format}, size: {img.size}")
+
+            # Now try ReportLab
+            c.drawImage(
+                logo_path,
+                x,
+                y,
+                width=logo_size,
+                height=logo_size,
+                preserveAspectRatio=True,
+                mask='auto',
+            )
+            print(f"DEBUG: Successfully loaded logo from: {logo_path}")
+            return True
+        except Exception as e:
+            print(f"DEBUG: Failed to load logo from {logo_path}: {e}")
+            import traceback
+            traceback.print_exc()
 
     # Fallback: Draw SSPL text in white box
+    print("DEBUG: No logo found, using text fallback")
     c.setFillColor(colors.white)
     c.rect(x, y, logo_size, logo_size, fill=1, stroke=1)
     c.setFont("Helvetica-Bold", 8)
