@@ -129,7 +129,7 @@ def _draw_logo(c, x, y, size_mm=12):
     logo_size = size_mm * mm
 
     # Hardcoded absolute path to the logo (most reliable approach)
-    logo_path = r"E:\Projects\emp-management-system\employee-management\public\assets\SSPL.png"
+    logo_path = os.path.join(current_app.root_path, 'static', 'assets', 'SSPL.png')
 
     print(f"DEBUG: Using hardcoded logo path: {logo_path}")
     print(f"DEBUG: Logo file exists: {os.path.exists(logo_path)}")
