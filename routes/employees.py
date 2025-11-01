@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify
-from services.employee_service import create_employee, bulk_import_from_frames, get_employee_by_id, get_all_employees, get_all_employees_unpaginated, search_employees
+from services.employee_service import create_employee, bulk_import_from_frames, get_employee_by_id, get_all_employees, get_all_employees_unpaginated, search_employees, synchronize_employee_id_sequence
 from models import db
 from models.employee import Employee
 from models.wage_master import WageMaster
@@ -512,6 +512,14 @@ def bulk_upload_optimized():
                         "error": f"Chunk insert failed: {str(e)}"
                     })
         
+        # Synchronize employee ID sequence after bulk upload
+        if inserted > 0:
+            try:
+                synchronize_employee_id_sequence()
+                print("Employee ID sequence synchronized after bulk upload")
+            except Exception as seq_error:
+                print(f"Warning: Failed to synchronize sequence after bulk upload: {seq_error}")
+
         return jsonify({
             "success": True,
             "summary": {
@@ -738,7 +746,15 @@ def update_employee(employee_id):
         }), 200
     except Exception as e:
         db.session.rollback()
-        return jsonify({"success": False, "message": str(e)}), 400
+        # Check if it's a validation error and provide more specific feedback
+        error_message = str(e)
+        if "violates check constraint" in error_message.lower() or "null value" in error_message.lower():
+            return jsonify({
+                "success": False,
+                "message": "Validation failed. Please check that all required fields are filled correctly.",
+                "error_details": error_message
+            }), 400
+        return jsonify({"success": False, "message": error_message}), 400
 
 
 @employees_bp.route("/", methods=["GET", "OPTIONS"])

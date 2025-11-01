@@ -402,3 +402,40 @@ def reset_employee_id_sequence(start_value: int = 91510001):
     """
     db.session.execute(f"ALTER SEQUENCE employee_id_seq RESTART WITH {start_value}")
     db.session.commit()
+
+
+def synchronize_employee_id_sequence():
+    """
+    Synchronize the employee_id_seq sequence with the maximum existing employee_id.
+    This prevents duplicate key violations when manually registering employees after bulk uploads.
+
+    - If employees exist: sets sequence to MAX(employee_id) + 1
+    - If no employees exist: sets sequence to start at 91510000
+    """
+    try:
+        # Check if there are any employees
+        count_result = db.session.execute(text('SELECT COUNT(*) as count FROM employees')).fetchone()
+        employee_count = count_result.count
+
+        if employee_count > 0:
+            # Find the maximum employee_id
+            max_result = db.session.execute(text('SELECT MAX(employee_id) as max_id FROM employees')).fetchone()
+            max_id = max_result.max_id
+
+            # Set sequence to max_id + 1
+            new_start = max_id + 1
+            db.session.execute(text('SELECT setval(\'employee_id_seq\', :start_val, false)'), {'start_val': new_start})
+            db.session.commit()
+
+            print(f'SUCCESS: Employee ID sequence synchronized to start from {new_start} (after existing max ID {max_id})')
+        else:
+            # No employees, start from 91510000
+            db.session.execute(text('SELECT setval(\'employee_id_seq\', 91510000, false)'))
+            db.session.commit()
+
+            print('SUCCESS: Employee ID sequence synchronized to start from 91510000 (no existing employees)')
+
+    except Exception as e:
+        print(f'ERROR: Failed to synchronize employee ID sequence: {e}')
+        db.session.rollback()
+        raise

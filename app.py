@@ -18,6 +18,7 @@ from models.employee import Employee
 from flask_migrate import Migrate
 from models.site import Site
 from routes.superadmin import superadmin_bp
+from services.employee_service import synchronize_employee_id_sequence
 
 def create_app(register_blueprints: bool = True):
     app = Flask(__name__)
@@ -195,6 +196,14 @@ def create_app(register_blueprints: bool = True):
         app.register_blueprint(payroll_bp, url_prefix="/api/payroll")
         app.register_blueprint(id_cards_bp, url_prefix="/api/id-cards")
         app.register_blueprint(superadmin_bp, url_prefix="/api")
+
+        # Synchronize employee ID sequence on app startup
+        try:
+            with app.app_context():
+                synchronize_employee_id_sequence()
+                print("Employee ID sequence synchronized on app startup")
+        except Exception as seq_error:
+            print(f"Warning: Failed to synchronize sequence on startup: {seq_error}")
 
     @app.route("/")
     def home():
