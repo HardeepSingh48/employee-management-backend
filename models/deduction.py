@@ -57,3 +57,4 @@ class Deduction(db.Model):
 
 
 
+
