@@ -67,9 +67,10 @@ def login():
                 "message": "Identifier (username or email) and password are required"
             }), 400
 
-        # Find user by username or email
+        # Find user by username or email (handle NULL values)
         user = User.query.filter(
-            (User.username == identifier) | (User.email == identifier)
+            (User.username == identifier) |
+            ((User.email == identifier) & (User.email.isnot(None)))
         ).first()
         
         if not user:
@@ -197,6 +198,10 @@ def register():
                 "message": "Password and name are required"
             }), 400
 
+        # Convert empty strings to None
+        email = email if email and email.strip() else None
+        username = username if username and username.strip() else None
+
         if not email and not username:
             return jsonify({
                 "success": False,
@@ -204,7 +209,7 @@ def register():
             }), 400
 
         # Check if user already exists by email
-        if email:
+        if email is not None:
             existing_user = User.query.filter_by(email=email).first()
             if existing_user:
                 return jsonify({
@@ -213,7 +218,7 @@ def register():
                 }), 400
 
         # Check if user already exists by username
-        if username:
+        if username is not None:
             existing_user = User.query.filter_by(username=username).first()
             if existing_user:
                 return jsonify({
