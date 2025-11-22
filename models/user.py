@@ -24,7 +24,8 @@ class User(db.Model):
     employee_id = db.Column(db.Integer, db.ForeignKey("employees.employee_id"), nullable=True)
     
     # Authentication fields
-    email = db.Column(db.String(120), unique=True, nullable=False)
+    email = db.Column(db.String(120), unique=True, nullable=True)
+    username = db.Column(db.String(80), unique=True, nullable=True)
     password_hash = db.Column(db.String(255), nullable=False)
     
     # User details
@@ -91,6 +92,7 @@ class User(db.Model):
             'id': self.id,
             'employee_id': self.employee_id,
             'email': self.email,
+            'username': self.username,
             'name': self.name,
             'role': self.role,
             'is_active': self.is_active,
@@ -104,4 +106,4 @@ class User(db.Model):
         }
 
     def __repr__(self):
-        return f"<User {self.email} - {self.role}>"
+        return f"<User {self.username or self.email} - {self.role}>"

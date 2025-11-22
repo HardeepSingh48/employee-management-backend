@@ -58,22 +58,24 @@ def login():
                 "message": "No data provided"
             }), 400
         
-        email = data.get('email')
+        identifier = data.get('identifier')  # Can be username or email
         password = data.get('password')
-        
-        if not email or not password:
+
+        if not identifier or not password:
             return jsonify({
                 "success": False,
-                "message": "Email and password are required"
+                "message": "Identifier (username or email) and password are required"
             }), 400
-        
-        # Find user by email
-        user = User.query.filter_by(email=email).first()
+
+        # Find user by username or email
+        user = User.query.filter(
+            (User.username == identifier) | (User.email == identifier)
+        ).first()
         
         if not user:
             return jsonify({
                 "success": False,
-                "message": "Invalid email or password"
+                "message": "Invalid username/email or password"
             }), 401
         
         # Check if account is locked
@@ -96,7 +98,7 @@ def login():
             
             return jsonify({
                 "success": False,
-                "message": "Invalid email or password"
+                "message": "Invalid username/email or password"
             }), 401
         
         # Check if user is active
@@ -183,24 +185,41 @@ def register():
             }), 400
         
         email = data.get('email')
+        username = data.get('username')
         password = data.get('password')
         name = data.get('name')
         role = data.get('role', 'employee')
         employee_id = data.get('employee_id')
-        
-        if not email or not password or not name:
+
+        if not password or not name:
             return jsonify({
                 "success": False,
-                "message": "Email, password, and name are required"
+                "message": "Password and name are required"
             }), 400
-        
-        # Check if user already exists
-        existing_user = User.query.filter_by(email=email).first()
-        if existing_user:
+
+        if not email and not username:
             return jsonify({
                 "success": False,
-                "message": "User with this email already exists"
+                "message": "Either email or username is required"
             }), 400
+
+        # Check if user already exists by email
+        if email:
+            existing_user = User.query.filter_by(email=email).first()
+            if existing_user:
+                return jsonify({
+                    "success": False,
+                    "message": "User with this email already exists"
+                }), 400
+
+        # Check if user already exists by username
+        if username:
+            existing_user = User.query.filter_by(username=username).first()
+            if existing_user:
+                return jsonify({
+                    "success": False,
+                    "message": "User with this username already exists"
+                }), 400
         
         # Validate employee_id if provided
         employee = None
@@ -215,6 +234,7 @@ def register():
         # Create new user
         user = User(
             email=email,
+            username=username,
             name=name,
             role=role,
             employee_id=employee_id,

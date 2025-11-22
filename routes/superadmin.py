@@ -22,13 +22,17 @@ def superadmin_required(fn):
 def create_user(current_user):
     data = request.get_json()
     email = data.get('email')
+    username = data.get('username')
     password = data.get('password')
     name = data.get('name')
     role = data.get('role')
     site_id = data.get('site_id')
 
-    if not all([email, password, name, role]):
+    if not all([password, name, role]):
         return jsonify({"success": False, "message": "Missing required fields"}), 400
+
+    if not email and not username:
+        return jsonify({"success": False, "message": "Either email or username is required"}), 400
 
     if role not in ['admin', 'supervisor']:
         return jsonify({"success": False, "message": "Invalid role"}), 400
@@ -37,8 +41,13 @@ def create_user(current_user):
     if role == 'supervisor' and not site_id:
         return jsonify({"success": False, "message": "Site ID is required for supervisor role"}), 400
 
-    if User.query.filter_by(email=email).first():
+    # Check for existing email if provided
+    if email and User.query.filter_by(email=email).first():
         return jsonify({"success": False, "message": "User with this email already exists"}), 409
+
+    # Check for existing username if provided
+    if username and User.query.filter_by(username=username).first():
+        return jsonify({"success": False, "message": "User with this username already exists"}), 409
 
     # Validate site exists if site_id is provided
     if site_id:
@@ -50,6 +59,7 @@ def create_user(current_user):
     user = User(
         id=str(uuid.uuid4()),
         email=email,
+        username=username,
         name=name,
         role=role,
         site_id=site_id if role == 'supervisor' else None,
@@ -80,6 +90,7 @@ def get_users(current_user):
             'id': user.id,
             'name': user.name,
             'email': user.email,
+            'username': user.username,
             'role': user.role,
             'site_id': user.site_id
         }
@@ -129,6 +140,12 @@ def update_user(current_user, user_id):
             if existing_user:
                 return jsonify({"success": False, "message": "Email already exists"}), 400
             user.email = data['email']
+        if 'username' in data:
+            # Check if username is already taken by another user
+            existing_user = User.query.filter(User.username == data['username'], User.id != user_id).first()
+            if existing_user:
+                return jsonify({"success": False, "message": "Username already exists"}), 400
+            user.username = data['username']
         if 'role' in data:
             if data['role'] not in ['admin', 'supervisor']:
                 return jsonify({"success": False, "message": "Invalid role"}), 400
