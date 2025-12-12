@@ -1,4 +1,4 @@
-from sqlalchemy import and_
+from sqlalchemy import and_, text
 from models import db
 from models.employee import Employee
 from models.wage_master import WageMaster

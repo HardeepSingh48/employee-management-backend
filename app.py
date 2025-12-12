@@ -8,7 +8,7 @@ from config import (
     SECRET_KEY,
     CORS_ORIGINS,
     ADDITIONAL_CORS_ORIGINS,
-    COOLIFY_FQDN,  # IMPORT THIS!
+    COOLIFY_FQDN,
 )
 from models import db
 import os
@@ -34,7 +34,7 @@ def create_app(register_blueprints: bool = True):
         "http://127.0.0.1:3001",
         "https://employee-management-frontend-kohl-eight.vercel.app",
         "https://ssplsecurity.in",
-        "https://api.ssplsecurity.in",  # Add your API domain explicitly
+        "https://api.ssplsecurity.in",
     ]
 
     # Add production origins from config
@@ -55,6 +55,7 @@ def create_app(register_blueprints: bool = True):
     print(f"CORS allowed origins: {allowed_origins}")
 
     # Configure CORS with enhanced settings
+    # NOTE: automatic_options=True tells Flask-CORS to handle OPTIONS automatically
     CORS(app,
          origins=allowed_origins,
          methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
@@ -72,29 +73,6 @@ def create_app(register_blueprints: bool = True):
          send_wildcard=False,
          automatic_options=True,
          max_age=86400)
-
-    # Simplified CORS headers handler
-    @app.after_request
-    def add_cors_headers(response):
-        origin = request.headers.get('Origin')
-        
-        # If origin is in allowed list, set it
-        if origin in allowed_origins:
-            response.headers['Access-Control-Allow-Origin'] = origin
-        # Fallback for production
-        elif not origin:
-            response.headers['Access-Control-Allow-Origin'] = 'https://ssplsecurity.in'
-        
-        response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS, PATCH'
-        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With, Accept, Origin, X-CSRF-Token'
-        response.headers['Access-Control-Allow-Credentials'] = 'true'
-        response.headers['Access-Control-Max-Age'] = '86400'
-
-        # Debug logging
-        if os.getenv("FLASK_ENV") == "production" or os.getenv("DEBUG_CORS") == "true":
-            print(f"CORS Debug - Origin: {origin}, Allowed: {response.headers.get('Access-Control-Allow-Origin')}")
-
-        return response
     
     app.config["SQLALCHEMY_DATABASE_URI"] = SQLALCHEMY_DATABASE_URI
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = SQLALCHEMY_TRACK_MODIFICATIONS
