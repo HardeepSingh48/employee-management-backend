@@ -1018,16 +1018,18 @@ def bulk_upload_attendance(current_user):
             "message": f"Error processing file: {str(e)}"
         }), 500
 
-@attendance_bp.route("/template", methods=["GET","OPTIONS"])
+@attendance_bp.route("/template", methods=["GET", "OPTIONS"])
 @token_required
 def download_attendance_template(current_user):
-        # Handle OPTIONS preflight
+    # Handle OPTIONS preflight request
     if request.method == "OPTIONS":
         response = make_response("", 200)
-        response.headers["Access-Control-Allow-Origin"] = request.headers.get("Origin", "*")
-        response.headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
-        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
-        response.headers["Access-Control-Allow-Credentials"] = "true"
+        origin = request.headers.get('Origin', 'https://ssplsecurity.in')
+        response.headers['Access-Control-Allow-Origin'] = origin
+        response.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With'
+        response.headers['Access-Control-Allow-Credentials'] = 'true'
+        response.headers['Access-Control-Max-Age'] = '86400'
         return response
     
     if current_user.role not in ['supervisor', 'admin', 'superadmin']:
@@ -1147,17 +1149,20 @@ def download_attendance_template(current_user):
         safe_site = (site_param or 'all').strip().replace(' ', '_') if site_param else 'all'
         filename = f"attendance_template_{safe_site}_{month_name}_{current_year}.xlsx"
 
+        # Create response with send_file
         response = send_file(
-        output,
-        download_name=filename,
-        as_attachment=True,
-        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            output,
+            download_name=filename,
+            as_attachment=True,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
         )
-
-        response.headers["Access-Control-Allow-Origin"] = request.headers.get("Origin", "https://ssplsecurity.in")
-        response.headers["Access-Control-Allow-Credentials"] = "true"
-        response.headers["Access-Control-Expose-Headers"] = "Content-Disposition"
-    
+        
+        # Add CORS headers to file response
+        origin = request.headers.get('Origin', 'https://ssplsecurity.in')
+        response.headers['Access-Control-Allow-Origin'] = origin
+        response.headers['Access-Control-Allow-Credentials'] = 'true'
+        response.headers['Access-Control-Expose-Headers'] = 'Content-Disposition, Content-Type'
+        
         return response
         
     except Exception as e:
@@ -1165,8 +1170,7 @@ def download_attendance_template(current_user):
         return jsonify({
             "success": False,
             "message": f"Error generating template: {str(e)}"
-        }), 500
-        
+        }), 500       
 
 @attendance_bp.route("/bulk-mark-excel", methods=["POST"])
 @token_required

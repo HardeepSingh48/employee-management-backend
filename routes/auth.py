@@ -1,10 +1,11 @@
-from flask import Blueprint, request, jsonify, current_app
+from flask import Blueprint, request, jsonify, current_app,make_response
 from models import db
 from models.user import User
 from models.employee import Employee
 from datetime import datetime, timedelta
 import jwt
 from functools import wraps
+from config import SECRET_KEY
 
 auth_bp = Blueprint("auth", __name__)
 
@@ -20,32 +21,51 @@ def generate_token(user):
     return jwt.encode(payload, current_app.config['SECRET_KEY'], algorithm='HS256')
 
 def token_required(f):
-    """Decorator to require valid JWT token"""
     @wraps(f)
     def decorated(*args, **kwargs):
-        token = request.headers.get('Authorization')
+        # CRITICAL FIX: Allow OPTIONS requests through without authentication
+        if request.method == 'OPTIONS':
+            # Return 200 OK for preflight with CORS headers
+            origin = request.headers.get('Origin', '*')
+            response = make_response('', 200)
+            response.headers['Access-Control-Allow-Origin'] = origin
+            response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS, PATCH'
+            response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With'
+            response.headers['Access-Control-Allow-Credentials'] = 'true'
+            response.headers['Access-Control-Max-Age'] = '86400'
+            return response
+        
+        token = None
+        
+        # Check for token in Authorization header
+        if 'Authorization' in request.headers:
+            auth_header = request.headers['Authorization']
+            try:
+                token = auth_header.split(" ")[1]  # Bearer <token>
+            except IndexError:
+                return jsonify({'success': False, 'message': 'Invalid token format'}), 401
         
         if not token:
             return jsonify({'success': False, 'message': 'Token is missing'}), 401
         
         try:
-            if token.startswith('Bearer '):
-                token = token[7:]
+            # Decode the token
+            data = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
+            current_user = User.query.filter_by(email=data['email']).first()
             
-            data = jwt.decode(token, current_app.config['SECRET_KEY'], algorithms=['HS256'])
-            current_user = User.query.filter_by(id=data['user_id']).first()
+            if not current_user:
+                return jsonify({'success': False, 'message': 'User not found'}), 401
             
-            if not current_user or not current_user.is_active:
-                return jsonify({'success': False, 'message': 'Invalid token'}), 401
-                
         except jwt.ExpiredSignatureError:
             return jsonify({'success': False, 'message': 'Token has expired'}), 401
         except jwt.InvalidTokenError:
             return jsonify({'success': False, 'message': 'Invalid token'}), 401
+        except Exception as e:
+            return jsonify({'success': False, 'message': f'Token verification failed: {str(e)}'}), 401
         
         return f(current_user, *args, **kwargs)
+    
     return decorated
-
 @auth_bp.route("/login", methods=["POST"])
 def login():
     """Employee/Admin login endpoint"""

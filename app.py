@@ -55,7 +55,6 @@ def create_app(register_blueprints: bool = True):
     print(f"CORS allowed origins: {allowed_origins}")
 
     # Configure CORS with enhanced settings
-    # NOTE: automatic_options=True tells Flask-CORS to handle OPTIONS automatically
     CORS(app,
          origins=allowed_origins,
          methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
@@ -69,7 +68,7 @@ def create_app(register_blueprints: bool = True):
              "X-CSRF-Token",
          ],
          supports_credentials=True,
-         expose_headers=["Content-Type", "Authorization", "X-Total-Count"],
+         expose_headers=["Content-Type", "Authorization", "X-Total-Count", "Content-Disposition"],
          send_wildcard=False,
          automatic_options=True,
          max_age=86400)
@@ -182,6 +181,41 @@ def create_app(register_blueprints: bool = True):
                 print("Employee ID sequence synchronized on app startup")
         except Exception as seq_error:
             print(f"Warning: Failed to synchronize sequence on startup: {seq_error}")
+
+    # SOLUTION 3: Add after_request handler for CORS
+    # This ensures ALL responses have proper CORS headers
+    @app.after_request
+    def after_request(response):
+        origin = request.headers.get('Origin')
+        
+        # Log for debugging
+        if origin:
+            print(f"Request from origin: {origin}, Method: {request.method}, Path: {request.path}")
+        
+        # Check if origin is in allowed list
+        if origin in allowed_origins:
+            response.headers['Access-Control-Allow-Origin'] = origin
+            response.headers['Access-Control-Allow-Credentials'] = 'true'
+            response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS, PATCH'
+            response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With, Accept, Origin'
+            response.headers['Access-Control-Expose-Headers'] = 'Content-Disposition, X-Total-Count, Content-Type'
+            response.headers['Access-Control-Max-Age'] = '86400'
+        
+        return response
+
+    # SOLUTION 3.5: Handle OPTIONS requests globally (belt and suspenders approach)
+    @app.before_request
+    def handle_preflight():
+        if request.method == "OPTIONS":
+            origin = request.headers.get('Origin')
+            if origin in allowed_origins:
+                response = make_response("", 200)
+                response.headers['Access-Control-Allow-Origin'] = origin
+                response.headers['Access-Control-Allow-Credentials'] = 'true'
+                response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS, PATCH'
+                response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With, Accept, Origin'
+                response.headers['Access-Control-Max-Age'] = '86400'
+                return response
 
     @app.route("/")
     def home():
