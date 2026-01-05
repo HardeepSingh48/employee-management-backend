@@ -31,7 +31,7 @@ class User(db.Model):
     # User details
     name = db.Column(db.String(150), nullable=False)
     role = db.Column(db.String(20),
-            db.CheckConstraint("role IN ('admin', 'superadmin', 'hr', 'manager', 'employee', 'supervisor')"),
+            db.CheckConstraint("role IN ('admin', 'admin1', 'admin2', 'superadmin', 'hr', 'manager', 'employee', 'supervisor')"),
             nullable=False, default='employee')
     
     # Status and permissions
@@ -85,6 +85,18 @@ class User(db.Model):
         """Set user permissions from list"""
         import json
         self.permissions = json.dumps(permissions_list)
+
+    def has_salary_code_access(self):
+        """Check if user can modify salary codes (create/update/delete)"""
+        return self.role in ['superadmin', 'admin1', 'admin']
+
+    def is_admin(self):
+        """Check if user has any admin role"""
+        return self.role in ['superadmin', 'admin', 'admin1', 'admin2']
+
+    def is_full_admin(self):
+        """Check if user has full admin access (including salary codes)"""
+        return self.role in ['superadmin', 'admin1', 'admin']
 
     def to_dict(self):
         """Convert user to dictionary for API responses"""

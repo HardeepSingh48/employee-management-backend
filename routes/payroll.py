@@ -47,7 +47,7 @@ def require_admin_or_supervisor(f):
     @wraps(f)
     def decorated_function(current_user, *args, **kwargs):
         try:
-            allowed_roles = ['admin', 'supervisor', 'hr', 'manager']  # Include hr and manager as they have admin-level access
+            allowed_roles = ['admin', 'admin1', 'admin2', 'supervisor', 'hr', 'manager']
             if not current_user or current_user.role not in allowed_roles:
                 return jsonify({'success': False, 'message': f'Access denied. Admin or Supervisor role required. Current role: {current_user.role if current_user else "None"}'}), 403
                 

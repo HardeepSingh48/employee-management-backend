@@ -365,7 +365,7 @@ def mark_attendance(current_user):
 
         # Admins have no restrictions - they can mark any date for any employee
         attendance_status = data.get('attendance_status', 'Present')
-        marked_by = current_user.role if current_user.role in ['supervisor', 'admin'] else 'employee'
+        marked_by = current_user.role if current_user.role in ['supervisor', 'admin', 'admin1', 'admin2'] else 'employee'
 
         # Parse datetime fields if provided
         check_in_time = None
@@ -424,7 +424,7 @@ def bulk_mark_attendance(current_user):
     """
     Mark attendance for multiple employees (supervisor only)
     """
-    if current_user.role not in ['supervisor', 'admin']:
+    if current_user.role not in ['supervisor', 'admin', 'admin1', 'admin2']:
         return jsonify({"success": False, "message": "Unauthorized"}), 403
     
     try:
@@ -533,7 +533,7 @@ def get_site_employees(current_user):
     - per_page: Items per page (default: 50, max: 200)
     - search: Search term for employee name or ID
     """
-    if current_user.role not in ['supervisor', 'admin']:
+    if current_user.role not in ['supervisor', 'admin', 'admin1', 'admin2']:
         return jsonify({"success": False, "message": "Unauthorized"}), 403
 
     try:
@@ -630,7 +630,7 @@ def get_site_attendance(current_user):
     - page: Page number (default: 1)
     - per_page: Items per page (default: 100, max: 500)
     """
-    if current_user.role not in ['supervisor', 'admin']:
+    if current_user.role not in ['supervisor', 'admin', 'admin1', 'admin2']:
         return jsonify({"success": False, "message": "Unauthorized"}), 403
 
     try:
@@ -909,7 +909,7 @@ def get_today_attendance():
 @token_required
 def bulk_upload_attendance(current_user):
     """Bulk upload attendance via Excel file (supervisor only)"""
-    if current_user.role not in ['supervisor', 'admin']:
+    if current_user.role not in ['supervisor', 'admin', 'admin1', 'admin2']:
         return jsonify({"success": False, "message": "Unauthorized"}), 403
     
     if 'file' not in request.files:
@@ -1032,7 +1032,7 @@ def download_attendance_template(current_user):
         response.headers['Access-Control-Max-Age'] = '86400'
         return response
     
-    if current_user.role not in ['supervisor', 'admin', 'superadmin']:
+    if current_user.role not in ['supervisor', 'admin', 'admin1', 'admin2', 'superadmin']:
         return jsonify({"success": False, "message": "Unauthorized"}), 403
     
     # Optional filters from frontend
@@ -1190,7 +1190,7 @@ def bulk_mark_attendance_excel(current_user):
 
     try:
         # PHASE 1: Request Validation
-        if current_user.role not in ['supervisor', 'admin']:
+        if current_user.role not in ['supervisor', 'admin', 'admin1', 'admin2']:
             return jsonify({"success": False, "message": "Unauthorized"}), 403
 
         if 'file' not in request.files:
@@ -1290,7 +1290,7 @@ def bulk_mark_attendance_excel(current_user):
         employee_ids_in_file = [eid for eid in employee_ids_in_file if eid and eid != 'nan']
 
         effective_site_id = current_user.site_id
-        if current_user.role == 'admin' and site_id_param:
+        if current_user.role in ['admin', 'admin1', 'admin2'] and site_id_param:
             effective_site_id = site_id_param
 
         employee_dict = batch_load_employees(
@@ -1764,7 +1764,7 @@ def generate_monthly_attendance_report_excel(current_user):
                     "message": "Supervisor site not configured"
                 }), 403
             effective_site_id = current_user.site_id
-        elif current_user.role == 'admin':
+        elif current_user.role in ['admin', 'admin1', 'admin2']:
             if not site_id:
                 return jsonify({
                     "success": False,

@@ -19,7 +19,7 @@ def bulk_mark_attendance(current_user):
     """
     Mark attendance for multiple employees (supervisor only)
     """
-    if current_user.role not in ['supervisor', 'admin']:
+    if current_user.role not in ['supervisor', 'admin', 'admin1', 'admin2']:
         return jsonify({"success": False, "message": "Unauthorized"}), 403
     
     try:

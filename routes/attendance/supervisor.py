@@ -16,7 +16,7 @@ def get_site_employees(current_user):
     """
     Get all employees for supervisor's site
     """
-    if current_user.role not in ['supervisor', 'admin']:
+    if current_user.role not in ['supervisor', 'admin', 'admin1', 'admin2']:
         return jsonify({"success": False, "message": "Unauthorized"}), 403
     
     try:
@@ -63,7 +63,7 @@ def get_site_attendance(current_user):
     """
     Get attendance records for supervisor's site with filtering
     """
-    if current_user.role not in ['supervisor', 'admin']:
+    if current_user.role not in ['supervisor', 'admin', 'admin1', 'admin2']:
         return jsonify({"success": False, "message": "Unauthorized"}), 403
     
     try:

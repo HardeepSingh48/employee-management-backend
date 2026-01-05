@@ -269,7 +269,7 @@ def register():
         user.set_password(password)
         
         # Set default permissions based on role
-        if role == 'admin':
+        if role in ['admin', 'admin1', 'admin2']:
             user.set_permissions(['all'])
         elif role == 'employee':
             user.set_permissions(['view_profile', 'mark_attendance', 'view_attendance'])
@@ -341,7 +341,7 @@ def logout(current_user):
 @token_required
 def assign_supervisor(current_user):
     """Assign a user as supervisor to a site (admin only)"""
-    if current_user.role != 'admin':
+    if current_user.role not in ['admin', 'admin1', 'admin2', 'superadmin']:
         return jsonify({"success": False, "message": "Unauthorized"}), 403
     
     try:
@@ -371,7 +371,7 @@ def assign_supervisor(current_user):
 @token_required
 def get_supervisors(current_user):
     """Get all supervisors (admin only)"""
-    if current_user.role != 'admin':
+    if current_user.role not in ['admin', 'admin1', 'admin2', 'superadmin']:
         return jsonify({"success": False, "message": "Unauthorized"}), 403
     
     try:

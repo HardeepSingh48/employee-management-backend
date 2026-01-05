@@ -49,7 +49,7 @@ def mark_attendance(current_user):
         # Optional fields with defaults
         attendance_date = data.get('attendance_date', date.today().isoformat())
         attendance_status = data.get('attendance_status', 'Present')
-        marked_by = current_user.role if current_user.role in ['supervisor', 'admin'] else 'employee'
+        marked_by = current_user.role if current_user.role in ['supervisor', 'admin', 'admin1', 'admin2'] else 'employee'
 
         # Parse datetime fields if provided
         check_in_time = None

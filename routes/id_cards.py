@@ -23,7 +23,7 @@ id_cards_bp = Blueprint("id_cards", __name__)
 def require_admin_or_superadmin(f):
     @wraps(f)
     def decorated(current_user, *args, **kwargs):
-        if not current_user or current_user.role not in ["admin", "superadmin"]:
+        if not current_user or current_user.role not in ["admin", "admin1", "admin2", "superadmin"]:
             return jsonify({"success": False, "message": "Forbidden"}), 403
         return f(current_user, *args, **kwargs)
     return decorated

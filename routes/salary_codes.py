@@ -5,6 +5,7 @@ from models.employee import Employee
 from utils.validators import validate_wage_master_data
 import re
 from functools import wraps
+from routes.auth import token_required
 
 def add_cors_headers(response):
     """Add CORS headers to response"""
@@ -47,7 +48,8 @@ def test_cors():
     })
 
 @salary_codes_bp.route("/create", methods=["POST", "OPTIONS"])
-def create_salary_code_alt():
+@token_required
+def create_salary_code_alt(current_user):
     """Alternative endpoint for creating salary codes (without trailing slash issues)"""
     # print(f"🔍 Alternative endpoint - Received {request.method} request to {request.url}")
 
@@ -56,13 +58,21 @@ def create_salary_code_alt():
         # print("✅ Alternative endpoint - Handling OPTIONS preflight request")
         return '', 200
 
+    # Role-based access control
+    if current_user.role not in ['superadmin', 'admin1', 'admin']:
+        return jsonify({
+            "success": False, 
+            "message": "Only superadmin and admin1 can create salary codes"
+        }), 403
+
     # Delegate to the main create function logic
-    return create_salary_code()
+    return create_salary_code(current_user)
 
 @salary_codes_bp.route("/", methods=["GET", "OPTIONS"])
 @salary_codes_bp.route("", methods=["GET", "OPTIONS"])
 @cors_enabled
-def list_salary_codes():
+@token_required
+def list_salary_codes(current_user):
     """List active salary codes with optional search and pagination.
 
     Query params:
@@ -70,6 +80,13 @@ def list_salary_codes():
       - page: optional int (defaults to 1)
       - per_page / limit: optional int (defaults to return all if not provided)
     """
+    # All admin roles can view salary codes
+    if current_user.role not in ['superadmin', 'admin', 'admin1', 'admin2', 'supervisor']:
+        return jsonify({
+            "success": False, 
+            "message": "Insufficient permissions to view salary codes"
+        }), 403
+
     try:
         # Read query params
         search_term = (request.args.get('search') or '').strip()
@@ -141,18 +158,20 @@ def list_salary_codes():
 
 
 @salary_codes_bp.route("/list", methods=["GET", "OPTIONS"])
-def list_salary_codes_alt():
+@token_required
+def list_salary_codes_alt(current_user):
     """Alternative endpoint for listing salary codes"""
     # Handle preflight OPTIONS request
     if request.method == 'OPTIONS':
         return '', 200
 
     # Delegate to the main list function
-    return list_salary_codes()
+    return list_salary_codes(current_user)
 
 
 @salary_codes_bp.route("/", methods=["POST", "OPTIONS"])
-def create_salary_code():
+@token_required
+def create_salary_code(current_user):
     """Create a new salary code"""
     # print(f"🔍 Received {request.method} request to {request.url}")
     # print(f"🔍 Request headers: {dict(request.headers)}")
@@ -162,6 +181,13 @@ def create_salary_code():
     if request.method == 'OPTIONS':
         # print("✅ Handling OPTIONS preflight request")
         return '', 200
+
+    # Role-based access control - only superadmin and admin1 can create salary codes
+    if current_user.role not in ['superadmin', 'admin1', 'admin']:
+        return jsonify({
+            "success": False, 
+            "message": "Only superadmin and admin1 can create salary codes. Your role does not have permission."
+        }), 403
 
     try:
         if request.is_json:
@@ -248,8 +274,16 @@ def create_salary_code():
 
 
 @salary_codes_bp.route("/bulk", methods=["POST"])
-def bulk_create_salary_codes():
+@token_required
+def bulk_create_salary_codes(current_user):
     """Bulk create salary codes from array of data"""
+    # Role-based access control
+    if current_user.role not in ['superadmin', 'admin1', 'admin']:
+        return jsonify({
+            "success": False, 
+            "message": "Only superadmin and admin1 can create salary codes"
+        }), 403
+
     try:
         if request.is_json:
             payload = request.get_json()
@@ -363,11 +397,19 @@ def _generate_salary_code(site_name: str, rank: str, state: str) -> str:
 
 
 @salary_codes_bp.route("/<salary_code>", methods=["GET", "OPTIONS"])
-def get_salary_code(salary_code):
+@token_required
+def get_salary_code(current_user, salary_code):
     """Get salary code details"""
     # Handle preflight OPTIONS request
     if request.method == 'OPTIONS':
         return '', 200
+
+    # All admin roles can view salary codes
+    if current_user.role not in ['superadmin', 'admin', 'admin1', 'admin2', 'supervisor']:
+        return jsonify({
+            "success": False, 
+            "message": "Insufficient permissions to view salary codes"
+        }), 403
 
     try:
         wage = WageMaster.query.filter_by(salary_code=salary_code, is_active=True).first()
@@ -395,8 +437,16 @@ def get_salary_code(salary_code):
 
 
 @salary_codes_bp.route("/<salary_code>", methods=["PUT"])
-def update_salary_code(salary_code):
+@token_required
+def update_salary_code(current_user, salary_code):
     """Update salary code"""
+    # Role-based access control - only superadmin and admin1 can update salary codes
+    if current_user.role not in ['superadmin', 'admin1', 'admin']:
+        return jsonify({
+            "success": False, 
+            "message": "Only superadmin and admin1 can update salary codes"
+        }), 403
+
     try:
         wage = WageMaster.query.filter_by(salary_code=salary_code, is_active=True).first()
         if not wage:
@@ -463,8 +513,16 @@ def update_salary_code(salary_code):
 
 
 @salary_codes_bp.route("/<salary_code>", methods=["DELETE"])
-def delete_salary_code(salary_code):
+@token_required
+def delete_salary_code(current_user, salary_code):
     """Soft delete salary code"""
+    # Role-based access control - only superadmin and admin1 can delete salary codes
+    if current_user.role not in ['superadmin', 'admin1', 'admin']:
+        return jsonify({
+            "success": False, 
+            "message": "Only superadmin and admin1 can delete salary codes"
+        }), 403
+
     try:
         wage = WageMaster.query.filter_by(salary_code=salary_code, is_active=True).first()
         if not wage:

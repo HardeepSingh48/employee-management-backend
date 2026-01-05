@@ -38,7 +38,7 @@ def create_user(current_user):
     if not email and not username:
         return jsonify({"success": False, "message": "Either email or username is required"}), 400
 
-    if role not in ['admin', 'supervisor']:
+    if role not in ['admin', 'admin1', 'admin2', 'supervisor']:
         return jsonify({"success": False, "message": "Invalid role"}), 400
 
     # Validate site_id for supervisor role
@@ -72,7 +72,7 @@ def create_user(current_user):
     user.set_password(password)
     
     # Set permissions based on role
-    if role == 'admin':
+    if role in ['admin', 'admin1', 'admin2']:
         user.set_permissions(['all'])
     elif role == 'supervisor':
         user.set_permissions(['view_employees', 'mark_attendance', 'view_reports'])
@@ -86,7 +86,7 @@ def create_user(current_user):
 @token_required
 @superadmin_required
 def get_users(current_user):
-    users = User.query.filter(User.role.in_(['admin', 'supervisor'])).all()
+    users = User.query.filter(User.role.in_(['admin', 'admin1', 'admin2', 'supervisor'])).all()
     
     users_data = []
     for user in users:
@@ -163,7 +163,7 @@ def update_user(current_user, user_id):
                     return jsonify({"success": False, "message": "Username already exists"}), 400
             user.username = username_data
         if 'role' in data:
-            if data['role'] not in ['admin', 'supervisor']:
+            if data['role'] not in ['admin', 'admin1', 'admin2', 'supervisor']:
                 return jsonify({"success": False, "message": "Invalid role"}), 400
             user.role = data['role']
         if 'site_id' in data:
@@ -174,7 +174,7 @@ def update_user(current_user, user_id):
                 if not site:
                     return jsonify({"success": False, "message": "Invalid site ID"}), 400
                 user.site_id = data['site_id']
-            elif user.role == 'admin':
+            elif user.role in ['admin', 'admin1', 'admin2']:
                 user.site_id = None  # Admins don't need site assignment
         
         # Update password if provided
