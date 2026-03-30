@@ -43,7 +43,7 @@ def get_site_employees(current_user):
                 'department_name': emp.department.department_name if emp.department else None,
                 'designation': emp.designation
             })
-        
+
         return jsonify({
             "success": True,
             "data": employee_data,

@@ -256,7 +256,7 @@ def generate_enhanced_reportlab_story(html_content: str, styles, company_style,
         payslip_count += 1
         
         # Extract company name
-        story.append(Paragraph("SSPL CONSTRUCTIONS PVT LTD", company_style))
+        story.append(Paragraph("SSPL PVT LTD", company_style))
         
         # Extract payslip period
         period_match = re.search(r'PAYSLIP FOR ([A-Z]+ \d{4})', payslip_html)
@@ -432,7 +432,7 @@ if __name__ == "__main__":
     </head>
     <body>
         <div class="payslip">
-            <h2>SSPL CONSTRUCTIONS PVT LTD</h2>
+            <h2>SSPL PVT LTD</h2>
             <p>PAYSLIP FOR AUG 2025</p>
             <div class="employee-info">
                 <p><strong>ID:</strong> 91510001</p>

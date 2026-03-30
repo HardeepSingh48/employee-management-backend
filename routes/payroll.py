@@ -209,7 +209,7 @@ def generate_payslip_html(employee_data, year, month):
     html = f"""
     <div class="payslip">
         <div class="header">
-            <h2>SSPL CONSTRUCTIONS PVT LTD</h2>
+            <h2>SSPL PVT LTD</h2>
             <p>PAYSLIP FOR {month_name} {year}</p>
         </div>
         
@@ -402,7 +402,7 @@ def generate_payslip_html_from_data(salary_data):
         html = f"""
         <div class="payslip">
             <div class="header">
-                <h2>SSPL CONSTRUCTIONS PVT LTD</h2>
+                <h2>SSPL PVT LTD</h2>
                 <p>PAYSLIP FOR {month_name} {year}</p>
             </div>
 
