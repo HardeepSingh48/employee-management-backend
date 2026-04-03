@@ -190,6 +190,21 @@ def register_employee():
                 if payload.get("branch_name"):
                     account.branch_name = payload.get("branch_name")
 
+            # --- DEDUCTION SHIFTING LOGIC ---
+            if emp.left_on:
+                from datetime import datetime as _dt
+                now = _dt.utcnow().date()
+                months_away = (now.year - emp.left_on.year) * 12 + (now.month - emp.left_on.month)
+                
+                if months_away > 0:
+                    for d in emp.deductions:
+                        # Check if deduction was active or incomplete when they left
+                        # months_diff_at_leave = (emp.left_on.year - start_month.year)*12 + ...
+                        diff_at_leave = (emp.left_on.year - d.start_month.year) * 12 + (emp.left_on.month - d.start_month.month)
+                        # Only pause if it hadn't fully expired before they left
+                        if diff_at_leave < (d.months + d.paused_months):
+                            d.paused_months += months_away
+
             db.session.commit()
 
             return jsonify({

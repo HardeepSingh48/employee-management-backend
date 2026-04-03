@@ -10,6 +10,7 @@ class Deduction(db.Model):
     deduction_type = db.Column(db.String(100), nullable=False)  # e.g., Clothes, Recovery, Loan
     total_amount = db.Column(db.Numeric(10, 2), nullable=False)
     months = db.Column(db.Integer, nullable=False)  # number of months to spread deduction
+    paused_months = db.Column(db.Integer, default=0, nullable=False, server_default='0')  # number of skipped months to shift schedule by
     start_month = db.Column(db.Date, nullable=False)  # first month from which deduction applies
     created_at = db.Column(db.DateTime(timezone=True), server_default=func.now())
     updated_at = db.Column(db.DateTime(timezone=True), onupdate=func.now())
@@ -37,8 +38,8 @@ class Deduction(db.Model):
         # Calculate months difference
         months_diff = (current_date.year - start_date.year) * 12 + (current_date.month - start_date.month)
         
-        # Deduction is active if current month is within the deduction period
-        return 0 <= months_diff < self.months
+        # Deduction is active if current month is within the deduction period (plus any skipped paused months)
+        return 0 <= months_diff < (self.months + self.paused_months)
 
     def get_installment_for_month(self, year, month):
         """Get installment amount for a specific month"""

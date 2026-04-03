@@ -51,6 +51,7 @@ def get_deductions(current_user):
                 'months': deduction.months,
                 'monthly_installment': deduction.monthly_installment(),
                 'start_month': deduction.start_month.strftime('%Y-%m-%d'),
+                'paused_months': deduction.paused_months,
                 'created_at': deduction.created_at.strftime('%Y-%m-%d %H:%M:%S') if deduction.created_at else None,
                 'status': 'Active' if deduction.is_active_for_month(datetime.now().year, datetime.now().month) else 'Completed'
             })
@@ -381,6 +382,7 @@ def get_employee_deductions(current_user, employee_id):
                 'months': deduction.months,
                 'monthly_installment': deduction.monthly_installment(),
                 'start_month': deduction.start_month.strftime('%Y-%m-%d'),
+                'paused_months': deduction.paused_months,
                 'created_at': deduction.created_at.strftime('%Y-%m-%d %H:%M:%S') if deduction.created_at else None,
                 'status': 'Active' if deduction.is_active_for_month(datetime.now().year, datetime.now().month) else 'Completed'
             })
