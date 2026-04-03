@@ -1,6 +1,7 @@
 from models import db
 from sqlalchemy.sql import func
 from sqlalchemy import Sequence, Index
+from datetime import datetime
 
 class Employee(db.Model):
     __tablename__ = "employees"
@@ -93,6 +94,11 @@ class Employee(db.Model):
     #Site ID
     site_id = db.Column(db.String(50), db.ForeignKey('sites.site_id'), nullable=True)
 
+
+    # Soft delete fields
+    is_deleted = db.Column(db.Boolean, default=False, nullable=False, server_default='false')
+    deleted_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    left_on = db.Column(db.Date, nullable=True)  # official last working date
 
     # Audit fields
     created_date = db.Column(db.Date, server_default=func.current_date())

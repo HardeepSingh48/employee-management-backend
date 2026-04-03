@@ -19,7 +19,7 @@ def get_deductions(current_user):
 
         query = db.session.query(Deduction, Employee).join(
             Employee, Deduction.employee_id == Employee.employee_id
-        )
+        ).filter(Employee.is_deleted == False)
 
         # Apply site filtering if site_id is provided
         if site_id:

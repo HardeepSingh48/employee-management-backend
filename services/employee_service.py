@@ -345,24 +345,24 @@ def pd_to_date(v):
         return None
 
 def get_employee_by_id(employee_id: int) -> Employee:
-    """Get employee by employee ID"""
-    return Employee.query.filter_by(employee_id=employee_id).first()
+    """Get employee by employee ID (excludes soft-deleted employees)"""
+    return Employee.query.filter_by(employee_id=employee_id, is_deleted=False).first()
 
 def get_all_employees(page: int = 1, per_page: int = 10):
-    """Get all employees with pagination"""
-    return Employee.query.paginate(
+    """Get all active (non-deleted) employees with pagination"""
+    return Employee.query.filter_by(is_deleted=False).paginate(
         page=page,
         per_page=per_page,
         error_out=False
     )
 
 def get_all_employees_unpaginated():
-    """Get all employees without pagination"""
-    return Employee.query.order_by(Employee.employee_id.asc()).all()
+    """Get all active (non-deleted) employees without pagination"""
+    return Employee.query.filter_by(is_deleted=False).order_by(Employee.employee_id.asc()).all()
 
 def search_employees(search_term: str = "", department: str = None, employment_status: str = None):
-    """Search employees by various criteria"""
-    query = Employee.query
+    """Search active (non-deleted) employees by various criteria"""
+    query = Employee.query.filter_by(is_deleted=False)
 
     if search_term:
         search_filter = f"%{search_term}%"

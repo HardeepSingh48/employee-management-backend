@@ -90,6 +90,128 @@ def register_employee():
         }), 400
 
     try:
+        # ----------------------------------------------------------------
+        # RE-IDENTIFICATION: Check if this is a returning employee
+        # Priority: Aadhaar (primary) → Phone (fallback)
+        # ----------------------------------------------------------------
+        adhar_number = payload.get("adhar_number") or payload.get("aadhaar_number")
+        phone_number = payload.get("phone_number") or payload.get("mobile_number")
+
+        # Placeholder values used by bulk upload — treat as no value
+        PLACEHOLDER_ADHAAR = "000000000000"
+        PLACEHOLDER_PHONE  = "9999999999"
+
+        matched_emp = None
+        match_field = None
+
+        # Step 1: Try Aadhaar match
+        if adhar_number and adhar_number != PLACEHOLDER_ADHAAR:
+            existing = Employee.query.filter_by(adhar_number=adhar_number).first()
+            if existing:
+                if not existing.is_deleted:
+                    # Active employee with same Aadhaar — reject duplicate registration
+                    return jsonify({
+                        "success": False,
+                        "message": f"An active employee with this Aadhaar number already exists (Employee ID: {existing.employee_id}). "
+                                   f"Please look up and edit that record instead."
+                    }), 409
+                else:
+                    matched_emp = existing
+                    match_field = "adhar_number"
+
+        # Step 2: Phone fallback (only if no Aadhaar match)
+        if matched_emp is None and phone_number and phone_number != PLACEHOLDER_PHONE:
+            existing = Employee.query.filter_by(phone_number=phone_number).first()
+            if existing:
+                if not existing.is_deleted:
+                    return jsonify({
+                        "success": False,
+                        "message": f"An active employee with this phone number already exists (Employee ID: {existing.employee_id}). "
+                                   f"Please look up and edit that record instead."
+                    }), 409
+                else:
+                    matched_emp = existing
+                    match_field = "phone_number"
+
+        # ----------------------------------------------------------------
+        # REACTIVATION: Returning employee found — restore same record
+        # ----------------------------------------------------------------
+        if matched_emp:
+            emp = matched_emp
+            emp.is_deleted = False
+            emp.deleted_at = None
+            emp.left_on = None
+            emp.employment_status = "Active"
+
+            # Update employment details from the new registration payload
+            if payload.get("hire_date") or payload.get("date_of_joining"):
+                from datetime import datetime as _dt
+                raw_date = payload.get("hire_date") or payload.get("date_of_joining")
+                try:
+                    emp.hire_date = _dt.fromisoformat(raw_date).date()
+                except Exception:
+                    pass
+
+            reactivation_fields = [
+                "first_name", "last_name", "father_name", "address", "email",
+                "alternate_contact_number", "gender", "blood_group", "nationality",
+                "marital_status", "adhar_number", "pan_card_number", "uan",
+                "esic_number", "employment_type", "designation", "work_location",
+                "reporting_manager", "salary_code", "skill_category", "department_id",
+                "pf_applicability", "esic_applicability", "professional_tax_applicability",
+                "highest_qualification", "year_of_passing", "experience_duration",
+                "emergency_contact_name", "emergency_contact_relationship",
+                "emergency_contact_phone", "site_id"
+            ]
+            boolean_fields = ["pf_applicability", "esic_applicability", "professional_tax_applicability"]
+
+            for field in reactivation_fields:
+                raw = payload.get(field)
+                if raw is not None and raw != "":
+                    if field in boolean_fields:
+                        if isinstance(raw, str):
+                            raw = raw.lower() in ["true", "1", "yes", "y"]
+                        setattr(emp, field, bool(raw))
+                    else:
+                        setattr(emp, field, raw)
+
+            # Update account details if new bank info is provided
+            if payload.get("bank_account_number") or payload.get("ifsc_code"):
+                account = AccountDetails.query.filter_by(emp_id=emp.employee_id).first()
+                if not account:
+                    account = AccountDetails(emp_id=emp.employee_id)
+                    db.session.add(account)
+                if payload.get("bank_account_number"):
+                    account.account_number = payload.get("bank_account_number")
+                if payload.get("bank_name"):
+                    account.bank_name = payload.get("bank_name")
+                if payload.get("ifsc_code"):
+                    account.ifsc_code = payload.get("ifsc_code")
+                if payload.get("branch_name"):
+                    account.branch_name = payload.get("branch_name")
+
+            db.session.commit()
+
+            return jsonify({
+                "success": True,
+                "reactivated": True,
+                "message": f"Employee re-activated successfully with the same Employee ID. "
+                           f"Existing deductions will continue from where they left off.",
+                "data": {
+                    "employee_id": emp.employee_id,
+                    "first_name": emp.first_name,
+                    "last_name": emp.last_name,
+                    "email": emp.email,
+                    "phone_number": emp.phone_number,
+                    "department_id": emp.department_id,
+                    "designation": emp.designation,
+                    "salary_code": emp.salary_code,
+                }
+            }), 200
+
+        # ----------------------------------------------------------------
+        # NORMAL REGISTRATION: Brand-new employee
+        # ----------------------------------------------------------------
         emp = create_employee(payload)
 
         # Save uploaded documents if present (Aadhaar, PAN, Voter ID front/back, Passbook front)
@@ -110,6 +232,7 @@ def register_employee():
 
         return jsonify({
             "success": True,
+            "reactivated": False,
             "message": "Employee registered successfully",
             "data": {
                 "employee_id": emp.employee_id,
@@ -572,7 +695,7 @@ def get_employee(employee_id):
     """Get employee details by employee ID"""
     try:
         employee = get_employee_by_id(employee_id)
-        if not employee:
+        if not employee or employee.is_deleted:
             return jsonify({"success": False, "message": "Employee not found"}), 404
 
          # Fetch account details (one-to-one relation)
@@ -632,37 +755,47 @@ def get_employee(employee_id):
 
 
 @employees_bp.route("/<employee_id>", methods=["PUT", "DELETE", "OPTIONS"])
-def update_employee(employee_id):
-    """Update or delete an existing employee"""
+@token_required
+def update_employee(current_user, employee_id):
+    """Update or soft-delete an existing employee"""
     if request.method == 'OPTIONS':
         return '', 200
 
     if request.method == 'DELETE':
         try:
-            emp = Employee.query.filter_by(employee_id=employee_id).first()
+            emp = Employee.query.filter_by(employee_id=employee_id, is_deleted=False).first()
             if not emp:
                 return jsonify({"success": False, "message": "Employee not found"}), 404
 
-            # Delete associated account details if they exist
-            account = AccountDetails.query.filter_by(emp_id=employee_id).first()
-            if account:
-                db.session.delete(account)
+            # --- SOFT DELETE --- preserve all data including deductions
+            emp.is_deleted = True
+            emp.deleted_at = datetime.utcnow()
+            emp.employment_status = 'Inactive'
 
-            # Delete the employee
-            db.session.delete(emp)
+            # Optionally record last working date from request body
+            try:
+                body = request.get_json(silent=True) or {}
+                if body.get('left_on'):
+                    from datetime import datetime as _dt
+                    emp.left_on = _dt.fromisoformat(body['left_on']).date()
+                else:
+                    emp.left_on = datetime.utcnow().date()
+            except Exception:
+                emp.left_on = datetime.utcnow().date()
+
             db.session.commit()
 
             return jsonify({
                 "success": True,
-                "message": "Employee deleted successfully"
+                "message": "Employee deactivated successfully. Their records and deductions have been preserved."
             }), 200
         except Exception as e:
             db.session.rollback()
             return jsonify({"success": False, "message": str(e)}), 400
 
-    # PUT method for updating
+    # PUT method for updating — block soft-deleted employees
     try:
-        emp = Employee.query.filter_by(employee_id=employee_id).first()
+        emp = Employee.query.filter_by(employee_id=employee_id, is_deleted=False).first()
         if not emp:
             return jsonify({"success": False, "message": "Employee not found"}), 404
 
@@ -772,8 +905,9 @@ def list_employees(current_user):  # Add current_user parameter
         department = request.args.get('department', '').strip()
         employment_status = request.args.get('status', '').strip()
 
-        # Base query
-        query = Employee.query
+        # Base query — never show soft-deleted employees by default
+        include_deleted = request.args.get('include_deleted', '').lower() == 'true'
+        query = Employee.query if include_deleted else Employee.query.filter_by(is_deleted=False)
 
         # Filter employees based on user role
         if current_user.role == 'supervisor':
@@ -942,7 +1076,10 @@ def get_site_employees(current_user):
         if not current_user.site_id:
             return jsonify({"success": False, "message": "Supervisor not assigned to any site"}), 400
         
-        employees = Employee.query.filter_by(site_id=current_user.site_id).order_by(Employee.employee_id.asc()).all()
+        employees = Employee.query.filter_by(
+            site_id=current_user.site_id,
+            is_deleted=False
+        ).order_by(Employee.employee_id.asc()).all()
         
         employee_list = []
         for emp in employees:
