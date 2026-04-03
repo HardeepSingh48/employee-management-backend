@@ -1,0 +1,73 @@
+name: Backend CI — Test
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────────
+  # JOB 1: Backend pytest suite
+  # ─────────────────────────────────────────────────────────────────────────
+  backend-tests:
+    name: Backend Tests (Python / pytest)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_DB: emp_test
+          POSTGRES_USER: testuser
+          POSTGRES_PASSWORD: testpass
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      # Pytest uses SQLite in-memory (see conftest.py) but migrations are checked against Postgres.
+      DATABASE_URL: postgresql://testuser:testpass@localhost:5432/emp_test
+      SECRET_KEY: ${{ secrets.SECRET_KEY || 'ci-secret-key-not-for-prod' }}
+      FLASK_APP: app.py
+      FLASK_ENV: testing
+      CREATE_APP_ON_IMPORT: "0"
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install backend dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run database migrations (against Postgres service)
+        env:
+          SQLALCHEMY_DATABASE_URI: postgresql://testuser:testpass@localhost:5432/emp_test
+        run: flask db upgrade
+
+      - name: Run pytest with coverage
+        run: |
+          pytest tests/ -v \
+            --cov=. \
+            --cov-omit="testing/*,migrations/*,.venv/*,tests/*" \
+            --cov-report=xml \
+            --cov-report=term-missing \
+            --tb=short
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage
+          path: coverage.xml
