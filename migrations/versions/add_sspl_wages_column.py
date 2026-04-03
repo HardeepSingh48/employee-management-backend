@@ -18,8 +18,20 @@ depends_on = None
 
 def upgrade():
     # Add sspl_wages column to wage_masters table
-    op.add_column('wage_masters', sa.Column('sspl_wages', sa.Float(), nullable=True))
-
+    # Add sspl_wages column conditionally
+    op.execute("""
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_name='wage_masters' AND column_name='sspl_wages'
+            ) THEN
+                ALTER TABLE wage_masters ADD COLUMN sspl_wages FLOAT;
+            END IF;
+        END
+        $$;
+    """)
 
 def downgrade():
     # Remove sspl_wages column from wage_masters table

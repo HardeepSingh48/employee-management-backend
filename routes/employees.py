@@ -835,7 +835,6 @@ def update_employee(current_user, employee_id):
                 # Convert date strings to date objects
                 elif field in date_fields and isinstance(value, str):
                     try:
-                        from datetime import datetime
                         value = datetime.fromisoformat(value).date()
                     except:
                         # If date parsing fails, skip this field

@@ -17,11 +17,34 @@ depends_on = None
 
 
 def upgrade():
-    # Add username column to users table
-    op.add_column('users', sa.Column('username', sa.String(length=80), nullable=True))
-    # Create unique index for username
-    op.create_index('ix_users_username', 'users', ['username'], unique=True)
-
+    # Add username column conditionally
+    op.execute("""
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_name='users' AND column_name='username'
+            ) THEN
+                ALTER TABLE users ADD COLUMN username VARCHAR(80);
+            END IF;
+        END
+        $$;
+    """)
+    # Create unique index for username conditionally
+    op.execute("""
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1
+                FROM pg_indexes
+                WHERE indexname = 'ix_users_username'
+            ) THEN
+                CREATE UNIQUE INDEX ix_users_username ON users (username);
+            END IF;
+        END
+        $$;
+    """)
 
 def downgrade():
     # Drop the unique index
