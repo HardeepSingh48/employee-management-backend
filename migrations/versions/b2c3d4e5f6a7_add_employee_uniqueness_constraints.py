@@ -89,19 +89,12 @@ def upgrade():
           AND adhar_number IS NOT NULL
           AND adhar_number != ''
           AND adhar_number != '000000000000'
+          AND adhar_number != 'LEFT'
     """))
 
-    conn.execute(text("""
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_active_phone
-        ON employees(phone_number)
-        WHERE is_deleted = FALSE
-          AND phone_number IS NOT NULL
-          AND phone_number != ''
-          AND phone_number != '9999999999'
-    """))
+    # Phone number uniqueness constraint has been removed per user request
 
 
 def downgrade():
     conn = op.get_bind()
     conn.execute(text("DROP INDEX IF EXISTS idx_unique_active_adhar"))
-    conn.execute(text("DROP INDEX IF EXISTS idx_unique_active_phone"))

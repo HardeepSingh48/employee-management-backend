@@ -29,3 +29,6 @@ Thumbs.db
 # Excel / test data files
 *.xlsx
 /testing/
+
+
+/scripts/

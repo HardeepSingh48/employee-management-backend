@@ -3,6 +3,7 @@ from services.employee_service import create_employee, bulk_import_from_frames, 
 from models import db
 from models.employee import Employee
 from models.wage_master import WageMaster
+from models.department import Department
 from utils.upload import save_file
 from models.account_details import AccountDetails
 from routes.auth import token_required
@@ -386,16 +387,25 @@ def bulk_upload_optimized():
         inserted = 0
         errors = []
 
+        # Pre-fetch validation data for case-insensitive matching
+        valid_depts = {d.department_id.upper(): d.department_id for d in Department.query.all()}
+        valid_wages = {w.salary_code.upper(): w.salary_code for w in WageMaster.query.all()}
+        
+        # Also track Aadhaar numbers already in DB to avoid unique constraint errors
+        existing_aadhaar = {e.adhar_number for e in Employee.query.with_entities(Employee.adhar_number).all()}
+        # Track Aadhaar numbers already seen in this file
+        file_aadhaar = set()
+
         # Debug: Print what we found
-        print(f"DEBUG: Total rows in Excel: {total_rows}")
-        print(f"DEBUG: Columns found: {list(df.columns)}")
-        print(f"DEBUG: Data types: {df.dtypes.to_dict()}")
-        print(f"DEBUG: First few rows:")
-        print(df.head(3))
-        print(f"DEBUG: Shape: {df.shape}")
+        # print(f"DEBUG: Total rows in Excel: {total_rows}")
+        # print(f"DEBUG: Columns found: {list(df.columns)}")
+        # print(f"DEBUG: Data types: {df.dtypes.to_dict()}")
+        # print(f"DEBUG: First few rows:")
+        # print(df.head(3))
+        # print(f"DEBUG: Shape: {df.shape}")
 
         # Only require essential columns - make most fields optional
-        essential_columns = ['Full Name']  # Only Full Name is absolutely required
+        essential_columns = ['Full Name', 'Aadhaar Number']  # Only Full Name is absolutely required
 
         recommended_columns = [
             'Marital Status', 'Permanent Address', 'Mobile Number', 'Aadhaar Number',
@@ -441,15 +451,44 @@ def bulk_upload_optimized():
                     first_name, last_name = split_full_name(row.get('Full Name'))
                     if not first_name:
                         errors.append({
-                            "row": idx + 2,  # +2 for Excel row (header + 0-index)
-                            "error": "First Name is required"
+                            "row": idx + 2,
+                            "error": "Full Name is required"
                         })
                         continue
+
+                    # Validate Aadhaar - mandatory and unique
+                    aadhaar = str(row.get('Aadhaar Number','')).strip()
+                    if not aadhaar or pd.isna(row.get('Aadhaar Number')) or aadhaar == '000000000000':
+                        errors.append({
+                            "row": idx + 2,
+                            "error": "Aadhaar Number is mandatory"
+                        })
+                        continue
+
+                    if aadhaar in existing_aadhaar:
+                        errors.append({
+                            "row": idx + 2,
+                            "error": f"Duplicate Error: Aadhaar Number '{aadhaar}' already exists in the database"
+                        })
+                        continue
+                    
+                    if aadhaar in file_aadhaar:
+                        errors.append({
+                            "row": idx + 2,
+                            "error": f"Duplicate Error: Aadhaar Number '{aadhaar}' is mentioned twice in your Excel file"
+                        })
+                        continue
+                    
+                    file_aadhaar.add(aadhaar)
 
                     # Use provided Employee Id if available, otherwise let database generate it
                     custom_employee_id = None
                     if 'Employee Id' in df.columns and not pd.isna(row.get('Employee Id')):
-                        custom_employee_id = int(row.get('Employee Id'))
+                        try:
+                            custom_employee_id = int(row.get('Employee Id'))
+                        except:
+                            errors.append({"row": idx+2, "error": f"Invalid Employee Id format: '{row.get('Employee Id')}'"})
+                            continue
 
                     # Provide defaults for missing fields
                     employee_data = {
@@ -464,14 +503,14 @@ def bulk_upload_optimized():
                         'address': 'Not Provided',  # Default address
                         'phone_number': '9999999999',  # Default phone - will be updated later
                         'alternate_contact_number': None,
-                        'adhar_number': '000000000000',  # Default Aadhaar
+                        'adhar_number': aadhaar,
                         'pan_card_number': 'AAAAA0000A',  # Default PAN
                         'voter_id_driving_license': None,
                         'uan': str(row.get('UAN Number', '')).strip() if 'UAN Number' in df.columns and not pd.isna(row.get('UAN Number')) else None,
                         'esic_number': None,
                         'hire_date': datetime.utcnow().date(),  # Default to today
                         'employment_type': 'Full-time',  # Default
-                        'department_id': 'IT',  # Default department (exists in database)
+                        'department_id': 'IT',  # Initial default
                         'designation': 'Employee',  # Default designation
                         'work_location': 'Main Office',  # Default
                         'reporting_manager': None,
@@ -494,7 +533,9 @@ def bulk_upload_optimized():
 
                     # Override defaults with provided values if available
                     if 'Marital Status' in df.columns and not pd.isna(row.get('Marital Status')):
-                        employee_data['marital_status'] = str(row.get('Marital Status')).strip()
+                        ms = str(row.get('Marital Status')).strip().capitalize()
+                        if ms in ['Single', 'Married', 'Divorced', 'Widowed']:
+                            employee_data['marital_status'] = ms
 
                     if 'Permanent Address' in df.columns and not pd.isna(row.get('Permanent Address')):
                         employee_data['address'] = str(row.get('Permanent Address')).strip()
@@ -504,10 +545,10 @@ def bulk_upload_optimized():
                         if phone:
                             employee_data['phone_number'] = phone
 
-                    if 'Aadhaar Number' in df.columns and not pd.isna(row.get('Aadhaar Number')):
-                        aadhaar = str(row.get('Aadhaar Number')).strip()
-                        if aadhaar:
-                            employee_data['adhar_number'] = aadhaar
+                    # if 'Aadhaar Number' in df.columns and not pd.isna(row.get('Aadhaar Number')):
+                    #     aadhaar = str(row.get('Aadhaar Number')).strip()
+                    #     if aadhaar:
+                    #         employee_data['adhar_number'] = aadhaar
 
                     if 'PAN Card Number' in df.columns and not pd.isna(row.get('PAN Card Number')):
                         pan = str(row.get('PAN Card Number')).strip()
@@ -522,9 +563,6 @@ def bulk_upload_optimized():
                     if 'Employment Type' in df.columns and not pd.isna(row.get('Employment Type')):
                         employee_data['employment_type'] = str(row.get('Employment Type')).strip()
 
-                    if 'Department' in df.columns and not pd.isna(row.get('Department')):
-                        employee_data['department_id'] = str(row.get('Department')).strip()
-
                     if 'Designation' in df.columns and not pd.isna(row.get('Designation')):
                         employee_data['designation'] = str(row.get('Designation')).strip()
 
@@ -535,16 +573,28 @@ def bulk_upload_optimized():
                     if custom_employee_id:
                         employee_data['employee_id'] = custom_employee_id
 
-                    # Validate salary_code exists in wage_masters
-                    salary_code = employee_data.get('salary_code')
-                    if salary_code and salary_code != 'DEFAULT':
-                        wage_master_exists = WageMaster.query.filter_by(salary_code=salary_code).first()
-                        if not wage_master_exists:
-                            errors.append({
-                                "row": idx + 2,
-                                "error": f"Invalid salary code: The provided salary code '{salary_code}' does not exist in the wage masters. Please verify and try again."
-                            })
-                            continue
+                    # Validate and map Salary Code (Case-insensitive)
+                    salary_code_input = str(row.get('Salary Code', 'DEFAULT')).strip()
+                    if salary_code_input.upper() in valid_wages:
+                        employee_data['salary_code'] = valid_wages[salary_code_input.upper()]
+                    else:
+                        errors.append({
+                            "row": idx + 2,
+                            "error": f"Invalid Salary Code: '{salary_code_input}'. Please use a valid salary code from the Wage Masters."
+                        })
+                        continue
+
+                    # Validate and map Department (Case-insensitive)
+                    dept_input = str(row.get('Department', 'IT')).strip()
+                    if dept_input.upper() in valid_depts:
+                        employee_data['department_id'] = valid_depts[dept_input.upper()]
+                    else:
+                        available_depts = ", ".join(list(valid_depts.values())[:5]) + "..."
+                        errors.append({
+                            "row": idx + 2,
+                            "error": f"Invalid Department: '{dept_input}'. Valid options include: {available_depts}"
+                        })
+                        continue
 
                     employees_to_insert.append(employee_data)
 
@@ -675,34 +725,6 @@ def bulk_upload_optimized():
             "message": f"Import failed: {str(e)}",
             "traceback": traceback.format_exc()
         }), 400
-
-
-# Old Bulk upload
-
-# @employees_bp.route("/bulk-upload", methods=["POST"])
-# def bulk_upload():
-#     """
-#     Multipart form-data:
-#       - file: Excel (.xlsx/.xls)
-#     Expected columns in every sheet:
-#       Full Name, Date of Birth, Gender, Site Name, Rank, State, Base Salary
-#     """
-#     # Lazy import to avoid heavy pandas dependency during app startup or when running seed scripts
-#     from utils.excel_parser import load_excel_to_frames
-#     file = request.files.get("file")
-#     if not file:
-#         return jsonify({"success": False, "message": "file is required"}), 400
-
-#     # (Optional) Save a copy to disk
-#     _ = save_file(file)
-
-#     try:
-#         frames = load_excel_to_frames(file)
-#         summary = bulk_import_from_frames(frames)
-#         status = 201 if summary["inserted"] > 0 else 400
-#         return jsonify({"success": True, "summary": summary}), status
-#     except Exception as e:
-#         return jsonify({"success": False, "message": str(e)}), 400
 
 
 @employees_bp.route("/<employee_id>", methods=["GET"])

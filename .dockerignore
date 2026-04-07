@@ -11,3 +11,4 @@ venv/
 .gitignore
 .pytest_cache
 tests/
+scripts/
