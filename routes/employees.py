@@ -385,14 +385,26 @@ def bulk_upload_optimized():
 
         total_rows = len(df)
         inserted = 0
+        reactivated = 0
         errors = []
 
+        # helper to sanitize aadhaar from various excel formats
+        def sanitize_aadhaar(val):
+            if pd.isna(val) or val is None: return ""
+            s = str(val).strip()
+            if s.endswith('.0'): s = s[:-2]
+            return s
+
+        # Extract all Aadhaar numbers from file for smart pre-fetching
+        all_aadhaar_in_file = [sanitize_aadhaar(x) for x in df['Aadhaar Number'].dropna().unique()]
+        
         # Pre-fetch validation data for case-insensitive matching
         valid_depts = {d.department_id.upper(): d.department_id for d in Department.query.all()}
         valid_wages = {w.salary_code.upper(): w.salary_code for w in WageMaster.query.all()}
         
-        # Also track Aadhaar numbers already in DB to avoid unique constraint errors
-        existing_aadhaar = {e.adhar_number for e in Employee.query.with_entities(Employee.adhar_number).all()}
+        # Fetch status of employees already in DB to handle duplicates vs reactivations
+        existing_employees = {e.adhar_number: e for e in Employee.query.filter(Employee.adhar_number.in_(all_aadhaar_in_file)).all()}
+        
         # Track Aadhaar numbers already seen in this file
         file_aadhaar = set()
 
@@ -457,7 +469,7 @@ def bulk_upload_optimized():
                         continue
 
                     # Validate Aadhaar - mandatory and unique
-                    aadhaar = str(row.get('Aadhaar Number','')).strip()
+                    aadhaar = sanitize_aadhaar(row.get('Aadhaar Number'))
                     if not aadhaar or pd.isna(row.get('Aadhaar Number')) or aadhaar == '000000000000':
                         errors.append({
                             "row": idx + 2,
@@ -465,12 +477,20 @@ def bulk_upload_optimized():
                         })
                         continue
 
-                    if aadhaar in existing_aadhaar:
-                        errors.append({
-                            "row": idx + 2,
-                            "error": f"Duplicate Error: Aadhaar Number '{aadhaar}' already exists in the database"
-                        })
-                        continue
+                    # Check for duplicates or reactivation
+                    existing_emp = existing_employees.get(aadhaar)
+                    is_reactivation = False
+                    
+                    if existing_emp:
+                        if not existing_emp.is_deleted:
+                            errors.append({
+                                "row": idx + 2,
+                                "error": f"Duplicate Error: An active employee with Aadhaar Number '{aadhaar}' already exists (Employee ID: {existing_emp.employee_id})"
+                            })
+                            continue
+                        else:
+                            # Flag for reactivation processing
+                            is_reactivation = True
                     
                     if aadhaar in file_aadhaar:
                         errors.append({
@@ -596,30 +616,83 @@ def bulk_upload_optimized():
                         })
                         continue
 
-                    employees_to_insert.append(employee_data)
+                    if is_reactivation:
+                        # --- REACTIVATION PATH ---
+                        try:
+                            emp = existing_emp
+                            emp.is_deleted = False
+                            emp.deleted_at = None
+                            emp.left_on = None
+                            emp.employment_status = "Active"
+                            
+                            # Update fields from employee_data
+                            for key, value in employee_data.items():
+                                if key != 'employee_id' and key != 'created_date':
+                                    setattr(emp, key, value)
+                            
+                            # Update account details
+                            account = AccountDetails.query.filter_by(emp_id=emp.employee_id).first()
+                            if not account:
+                                account = AccountDetails(emp_id=emp.employee_id)
+                                db.session.add(account)
+                            
+                            # Extract account info from account_data logic below
+                            # (We can use the same logic we use for new employees)
+                            
+                            row_account_data = {
+                                'account_number': '000000000000',
+                                'bank_name': 'Not Specified',
+                                'ifsc_code': 'XXXX0000000',
+                                'branch_name': None,
+                            }
+                            if 'Bank Account Number' in df.columns and not pd.isna(row.get('Bank Account Number')):
+                                row_account_data['account_number'] = str(row.get('Bank Account Number')).strip()
+                            if 'Bank Name' in df.columns and not pd.isna(row.get('Bank Name')):
+                                row_account_data['bank_name'] = str(row.get('Bank Name')).strip()
+                            if 'IFSC Code' in df.columns and not pd.isna(row.get('IFSC Code')):
+                                row_account_data['ifsc_code'] = str(row.get('IFSC Code')).strip()
+                            if 'Branch Name' in df.columns and not pd.isna(row.get('Branch Name')):
+                                row_account_data['branch_name'] = str(row.get('Branch Name')).strip()
 
-                    # Prepare account data with defaults (will be linked after employee creation)
-                    account_data = {
-                        'account_number': '000000000000',  # Default account number
-                        'bank_name': 'Not Specified',  # Default bank
-                        'ifsc_code': 'XXXX0000000',  # Default IFSC
-                        'branch_name': None,
-                    }
+                            account.account_number = row_account_data['account_number']
+                            account.bank_name = row_account_data['bank_name']
+                            account.ifsc_code = row_account_data['ifsc_code']
+                            account.branch_name = row_account_data['branch_name']
+                            
+                            reactivated += 1
+                            db.session.add(emp) # Mark for session update
+                            
+                        except Exception as e:
+                            errors.append({
+                                "row": idx + 2,
+                                "error": f"Reactivation failed: {str(e)}"
+                            })
+                    else:
+                        # --- NEW INSERT PATH ---
+                        employees_to_insert.append(employee_data)
 
-                    # Override with provided values if available
-                    if 'Bank Account Number' in df.columns and not pd.isna(row.get('Bank Account Number')):
-                        account_data['account_number'] = str(row.get('Bank Account Number')).strip()
+                        # Prepare account data with defaults (will be linked after employee creation)
+                        account_data = {
+                            'account_number': '000000000000',  # Default account number
+                            'bank_name': 'Not Specified',  # Default bank
+                            'ifsc_code': 'XXXX0000000',  # Default IFSC
+                            'branch_name': None,
+                        }
 
-                    if 'Bank Name' in df.columns and not pd.isna(row.get('Bank Name')):
-                        account_data['bank_name'] = str(row.get('Bank Name')).strip()
+                        # Override with provided values if available
+                        if 'Bank Account Number' in df.columns and not pd.isna(row.get('Bank Account Number')):
+                            account_data['account_number'] = str(row.get('Bank Account Number')).strip()
 
-                    if 'IFSC Code' in df.columns and not pd.isna(row.get('IFSC Code')):
-                        account_data['ifsc_code'] = str(row.get('IFSC Code')).strip()
+                        if 'Bank Name' in df.columns and not pd.isna(row.get('Bank Name')):
+                            account_data['bank_name'] = str(row.get('Bank Name')).strip()
 
-                    if 'Branch Name' in df.columns and not pd.isna(row.get('Branch Name')):
-                        account_data['branch_name'] = str(row.get('Branch Name')).strip()
+                        if 'IFSC Code' in df.columns and not pd.isna(row.get('IFSC Code')):
+                            account_data['ifsc_code'] = str(row.get('IFSC Code')).strip()
 
-                    accounts_to_insert.append(account_data)
+                        if 'Branch Name' in df.columns and not pd.isna(row.get('Branch Name')):
+                            account_data['branch_name'] = str(row.get('Branch Name')).strip()
+
+                        accounts_to_insert.append(account_data)
                     
                 except Exception as e:
                     errors.append({
@@ -713,10 +786,11 @@ def bulk_upload_optimized():
             "summary": {
                 "total": total_rows,
                 "inserted": inserted,
+                "reactivated": reactivated,
                 "failed": len(errors),
                 "errors": errors[:50]  # Limit errors shown to first 50
             }
-        }), 201 if inserted > 0 else 400
+        }), 201 if (inserted > 0 or reactivated > 0) else 400
         
     except Exception as e:
         db.session.rollback()
