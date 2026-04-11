@@ -573,10 +573,32 @@ def bulk_upload_optimized():
                         employee_data['date_of_birth'] = parse_date(row.get('Date of Birth'))
 
                     if 'Gender' in df.columns and not pd.isna(row.get('Gender')):
-                        employee_data['gender'] = str(row.get('Gender')).strip()
+                        gender_raw = str(row.get('Gender')).strip().lower()
+                        if gender_raw in ['m', 'male', 'man']:
+                            employee_data['gender'] = 'Male'
+                        elif gender_raw in ['f', 'female', 'woman']:
+                            employee_data['gender'] = 'Female'
+                        else:
+                            employee_data['gender'] = 'Other'
 
                     if 'Blood Group' in df.columns and not pd.isna(row.get('Blood Group')):
-                        employee_data['blood_group'] = str(row.get('Blood Group')).strip()
+                        bg_raw = str(row.get('Blood Group')).strip().upper().replace(" ", "").replace(".", "")
+                        bg_raw = bg_raw.replace("POSITIVE", "+").replace("POS", "+").replace("VE", "")
+                        bg_raw = bg_raw.replace("NEGATIVE", "-").replace("NEG", "-")
+                        
+                        valid_bgs = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"]
+                        if bg_raw in valid_bgs:
+                            employee_data['blood_group'] = bg_raw
+                        else:
+                            # Try to find if it contains the parts
+                            matched = False
+                            for vb in valid_bgs:
+                                if vb in bg_raw or bg_raw in vb:
+                                    employee_data['blood_group'] = vb
+                                    matched = True
+                                    break
+                            if not matched:
+                                employee_data['blood_group'] = bg_raw # keep raw if no match found
                         
                     if 'Alternate Contact Number' in df.columns and not pd.isna(row.get('Alternate Contact Number')):
                         employee_data['alternate_contact_number'] = sanitize_aadhaar(row.get('Alternate Contact Number'))
@@ -596,10 +618,49 @@ def bulk_upload_optimized():
                         employee_data['reporting_manager'] = str(row.get('Reporting Manager')).strip()
 
                     if 'Skill Category' in df.columns and not pd.isna(row.get('Skill Category')):
-                        employee_data['skill_category'] = str(row.get('Skill Category')).strip()
+                        skill_raw = str(row.get('Skill Category')).strip().lower()
+                        if "highly" in skill_raw:
+                            employee_data['skill_category'] = "Highly Skilled"
+                        elif "semi" in skill_raw:
+                            employee_data['skill_category'] = "Semi-Skilled"
+                        elif "unskilled" in skill_raw or "un-skilled" in skill_raw:
+                            employee_data['skill_category'] = "Unskilled"
+                        elif "skilled" in skill_raw:
+                            employee_data['skill_category'] = "Skilled"
+                        else:
+                            employee_data['skill_category'] = skill_raw.title()
 
                     if 'Highest Qualification' in df.columns and not pd.isna(row.get('Highest Qualification')):
-                        employee_data['highest_qualification'] = str(row.get('Highest Qualification')).strip()
+                        qual_raw = str(row.get('Highest Qualification')).strip()
+                        qual_normalized = qual_raw.lower().replace("-", " ").replace("'", "")
+                        
+                        if "non" in qual_normalized and ("matric" in qual_normalized or "metric" in qual_normalized):
+                            employee_data['highest_qualification'] = "Non Metric"
+                        elif "matric" in qual_normalized or "metric" in qual_normalized:
+                            employee_data['highest_qualification'] = "Metric"
+                        elif "high school" in qual_normalized:
+                            employee_data['highest_qualification'] = "High School"
+                        elif "inter" in qual_normalized:
+                            employee_data['highest_qualification'] = "Intermediate"
+                        elif "diploma" in qual_normalized:
+                            employee_data['highest_qualification'] = "Diploma"
+                        elif "bachelor" in qual_normalized:
+                            employee_data['highest_qualification'] = "Bachelor's"
+                        elif "master" in qual_normalized:
+                            employee_data['highest_qualification'] = "Master's"
+                        elif "phd" in qual_normalized or "ph.d" in qual_normalized:
+                            employee_data['highest_qualification'] = "PhD"
+                        else:
+                            employee_data['highest_qualification'] = "Not Specified"
+
+                    if 'Year of Passing' in df.columns and not pd.isna(row.get('Year of Passing')):
+                        yop_raw = str(row.get('Year of Passing')).strip()
+                        # Use sanitize_aadhaar to strip .0 if it's a float from Excel
+                        yop_clean = sanitize_aadhaar(row.get('Year of Passing'))
+                        if yop_clean.isdigit() and len(yop_clean) == 4:
+                            employee_data['year_of_passing'] = yop_clean
+                        else:
+                            employee_data['year_of_passing'] = None
 
                     if 'Emergency Contact Name' in df.columns and not pd.isna(row.get('Emergency Contact Name')):
                         employee_data['emergency_contact_name'] = str(row.get('Emergency Contact Name')).strip()
@@ -608,12 +669,31 @@ def bulk_upload_optimized():
                         employee_data['emergency_contact_relationship'] = str(row.get('Emergency Relationship')).strip()
 
                     if 'Emergency Phone Number' in df.columns and not pd.isna(row.get('Emergency Phone Number')):
-                        employee_data['emergency_contact_phone'] = sanitize_aadhaar(row.get('Emergency Phone Number'))
+                        ec_raw = str(row.get('Emergency Phone Number')).strip()
+                        if ec_raw == '-' or ec_raw == '':
+                            employee_data['emergency_contact_phone'] = ''
+                        else:
+                            ec_phone = sanitize_aadhaar(row.get('Emergency Phone Number'))
+                            if not ec_phone.isdigit() and ec_phone != '':
+                                errors.append({
+                                    "row": idx + 2,
+                                    "error": f"Invalid Emergency Contact Number: '{ec_raw}'. It must contain only digits."
+                                })
+                                continue
+                            employee_data['emergency_contact_phone'] = ec_phone
 
                     if 'Marital Status' in df.columns and not pd.isna(row.get('Marital Status')):
-                        ms = str(row.get('Marital Status')).strip().capitalize()
-                        if ms in ['Single', 'Married', 'Divorced', 'Widowed']:
-                            employee_data['marital_status'] = ms
+                        ms_raw = str(row.get('Marital Status')).strip().lower()
+                        if ms_raw in ['single', 'unmarried', 'alone']:
+                            employee_data['marital_status'] = 'Single'
+                        elif ms_raw in ['married', 'couple']:
+                            employee_data['marital_status'] = 'Married'
+                        elif ms_raw in ['divorced', 'separated']:
+                            employee_data['marital_status'] = 'Divorced'
+                        elif ms_raw in ['widowed', 'widow', 'widower']:
+                            employee_data['marital_status'] = 'Widowed'
+                        else:
+                            employee_data['marital_status'] = 'Single' # Safety fallback to Single
 
                     if 'Permanent Address' in df.columns and not pd.isna(row.get('Permanent Address')):
                         employee_data['address'] = str(row.get('Permanent Address')).strip()
