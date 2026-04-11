@@ -293,17 +293,27 @@ def split_full_name(full_name):
     return first_name, last_name
 
 def parse_date(date_value):
-    """Parse date from various formats"""
+    """Parse date from various formats, strictly enforcing YYYY-MM-DD, DD-MM-YYYY, DD/MM/YYYY"""
     if pd.isna(date_value) or date_value == '':
         return None
     
     if isinstance(date_value, datetime):
         return date_value.date()
+        
+    if hasattr(date_value, 'date') and callable(getattr(date_value, 'date')):
+        return date_value.date()
     
-    try:
-        return pd.to_datetime(date_value).date()
-    except:
-        return None
+    date_str = str(date_value).strip()
+    
+    formats = ['%Y-%m-%d', '%d-%m-%Y', '%d/%m/%Y']
+    for fmt in formats:
+        try:
+            return datetime.strptime(date_str, fmt).date()
+        except ValueError:
+            continue
+            
+    # If all formats fail, raise ValueError to reject the row
+    raise ValueError(f"Invalid date format: '{date_str}'. Expected YYYY-MM-DD, DD-MM-YYYY, or DD/MM/YYYY")
 
 @employees_bp.route("/bulk-upload", methods=["POST"])
 def bulk_upload_optimized():
@@ -477,6 +487,13 @@ def bulk_upload_optimized():
                         })
                         continue
 
+                    if len(aadhaar) != 12 or not aadhaar.isdigit():
+                        errors.append({
+                            "row": idx + 2,
+                            "error": "Aadhaar Number must be exactly 12 digits."
+                        })
+                        continue
+
                     # Check for duplicates or reactivation
                     existing_emp = existing_employees.get(aadhaar)
                     is_reactivation = False
@@ -524,7 +541,7 @@ def bulk_upload_optimized():
                         'phone_number': '9999999999',  # Default phone - will be updated later
                         'alternate_contact_number': None,
                         'adhar_number': aadhaar,
-                        'pan_card_number': 'AAAAA0000A',  # Default PAN
+                        'pan_card_number': '',  # Default PAN
                         'voter_id_driving_license': None,
                         'uan': str(row.get('UAN Number', '')).strip() if 'UAN Number' in df.columns and not pd.isna(row.get('UAN Number')) else None,
                         'esic_number': None,
@@ -552,6 +569,47 @@ def bulk_upload_optimized():
                     }
 
                     # Override defaults with provided values if available
+                    if 'Date of Birth' in df.columns and not pd.isna(row.get('Date of Birth')):
+                        employee_data['date_of_birth'] = parse_date(row.get('Date of Birth'))
+
+                    if 'Gender' in df.columns and not pd.isna(row.get('Gender')):
+                        employee_data['gender'] = str(row.get('Gender')).strip()
+
+                    if 'Blood Group' in df.columns and not pd.isna(row.get('Blood Group')):
+                        employee_data['blood_group'] = str(row.get('Blood Group')).strip()
+                        
+                    if 'Alternate Contact Number' in df.columns and not pd.isna(row.get('Alternate Contact Number')):
+                        employee_data['alternate_contact_number'] = sanitize_aadhaar(row.get('Alternate Contact Number'))
+
+                    if 'Voter ID / Driving License' in df.columns and not pd.isna(row.get('Voter ID / Driving License')):
+                        employee_data['voter_id_driving_license'] = str(row.get('Voter ID / Driving License')).strip()
+
+                    if 'UAN' in df.columns and not pd.isna(row.get('UAN')):
+                        employee_data['uan'] = sanitize_aadhaar(row.get('UAN'))
+                    elif 'UAN Number' in df.columns and not pd.isna(row.get('UAN Number')):
+                        employee_data['uan'] = sanitize_aadhaar(row.get('UAN Number'))
+
+                    if 'ESIC Number' in df.columns and not pd.isna(row.get('ESIC Number')):
+                        employee_data['esic_number'] = sanitize_aadhaar(row.get('ESIC Number'))
+
+                    if 'Reporting Manager' in df.columns and not pd.isna(row.get('Reporting Manager')):
+                        employee_data['reporting_manager'] = str(row.get('Reporting Manager')).strip()
+
+                    if 'Skill Category' in df.columns and not pd.isna(row.get('Skill Category')):
+                        employee_data['skill_category'] = str(row.get('Skill Category')).strip()
+
+                    if 'Highest Qualification' in df.columns and not pd.isna(row.get('Highest Qualification')):
+                        employee_data['highest_qualification'] = str(row.get('Highest Qualification')).strip()
+
+                    if 'Emergency Contact Name' in df.columns and not pd.isna(row.get('Emergency Contact Name')):
+                        employee_data['emergency_contact_name'] = str(row.get('Emergency Contact Name')).strip()
+
+                    if 'Emergency Relationship' in df.columns and not pd.isna(row.get('Emergency Relationship')):
+                        employee_data['emergency_contact_relationship'] = str(row.get('Emergency Relationship')).strip()
+
+                    if 'Emergency Phone Number' in df.columns and not pd.isna(row.get('Emergency Phone Number')):
+                        employee_data['emergency_contact_phone'] = sanitize_aadhaar(row.get('Emergency Phone Number'))
+
                     if 'Marital Status' in df.columns and not pd.isna(row.get('Marital Status')):
                         ms = str(row.get('Marital Status')).strip().capitalize()
                         if ms in ['Single', 'Married', 'Divorced', 'Widowed']:
@@ -561,27 +619,37 @@ def bulk_upload_optimized():
                         employee_data['address'] = str(row.get('Permanent Address')).strip()
 
                     if 'Mobile Number' in df.columns and not pd.isna(row.get('Mobile Number')):
-                        phone = str(row.get('Mobile Number')).strip()
+                        phone = sanitize_aadhaar(row.get('Mobile Number'))
                         if phone:
                             employee_data['phone_number'] = phone
 
-                    # if 'Aadhaar Number' in df.columns and not pd.isna(row.get('Aadhaar Number')):
-                    #     aadhaar = str(row.get('Aadhaar Number')).strip()
-                    #     if aadhaar:
-                    #         employee_data['adhar_number'] = aadhaar
-
                     if 'PAN Card Number' in df.columns and not pd.isna(row.get('PAN Card Number')):
-                        pan = str(row.get('PAN Card Number')).strip()
-                        if pan:
+                        pan = str(row.get('PAN Card Number')).strip().upper()
+                        if pan == '-' or pan == '':
+                            employee_data['pan_card_number'] = ''
+                        elif pan:
+                            import re
+                            if not re.match(r'^[A-Z]{5}[0-9]{4}[A-Z]{1}$', pan):
+                                errors.append({"row": idx+2, "error": f"Invalid PAN format: '{pan}'. Expected format involves 5 letters, 4 numbers, 1 letter."})
+                                continue
                             employee_data['pan_card_number'] = pan
 
-                    if 'Date of Joining' in df.columns:
-                        date_joining = parse_date(row.get('Date of Joining'))
-                        if date_joining:
-                            employee_data['hire_date'] = date_joining
+                    if 'Date of Joining' in df.columns and not pd.isna(row.get('Date of Joining')):
+                        employee_data['hire_date'] = parse_date(row.get('Date of Joining'))
 
                     if 'Employment Type' in df.columns and not pd.isna(row.get('Employment Type')):
-                        employee_data['employment_type'] = str(row.get('Employment Type')).strip()
+                        emp_type = str(row.get('Employment Type')).strip()
+                        normalized_type = emp_type.lower().replace(" ", "-")
+                        if "full" in normalized_type:
+                            employee_data['employment_type'] = "Full-time"
+                        elif "part" in normalized_type:
+                            employee_data['employment_type'] = "Part-time"
+                        elif "contract" in normalized_type:
+                            employee_data['employment_type'] = "Contract"
+                        elif "intern" in normalized_type:
+                            employee_data['employment_type'] = "Intern"
+                        else:
+                            employee_data['employment_type'] = emp_type
 
                     if 'Designation' in df.columns and not pd.isna(row.get('Designation')):
                         employee_data['designation'] = str(row.get('Designation')).strip()
