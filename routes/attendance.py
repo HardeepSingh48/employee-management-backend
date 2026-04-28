@@ -190,8 +190,9 @@ def process_employee_batch(batch_data):
                             is_sunday = attendance_date.weekday() == 6  # 6 = Sunday
                             if is_sunday and attendance_value == 'Present':
                                 attendance_value = 'OFF'  # Treat Sunday work as overtime
-                                if day_overtime == 0:
-                                    day_overtime = 1  # Ensure at least 1 overtime shift for Sunday work
+                                # Sunday work should always add one overtime shift, even when
+                                # monthly overtime is assigned to this same date.
+                                day_overtime += 1
 
                             if existing:
                                 # Mark for update
@@ -1558,8 +1559,9 @@ def bulk_mark_attendance_excel(current_user):
                                 is_sunday = attendance_date.weekday() == 6  # 6 = Sunday
                                 if is_sunday and attendance_value == 'Present':
                                     attendance_value = 'OFF'  # Treat Sunday work as overtime
-                                    if day_overtime == 0:
-                                        day_overtime = 1  # Ensure at least 1 overtime shift for Sunday work
+                                    # Sunday work should always add one overtime shift, even when
+                                    # monthly overtime is assigned to this same date.
+                                    day_overtime += 1
 
                                 if existing:
                                     # Mark for update

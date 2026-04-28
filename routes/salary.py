@@ -323,7 +323,7 @@ def export_salary_data():
         # Define expected column order for better readability
         expected_columns = [
             'Employee ID', 'Employee Name', 'Skill Level', 'Present Days',
-            'Basic', 'Special Basic', 'DA', 'HRA', 'Overtime', 'Overtime Allowance',
+            'Basic', 'Leave Wages', 'National & Festival', 'Special Basic', 'DA', 'HRA', 'Overtime', 'Overtime Allowance',
             'Clothes', 'Others', 'Total Earnings',
             'PF', 'ESIC', 'Society', 'Income Tax', 'Insurance', 'Others Recoveries',
             'Total Deductions', 'Net Salary'
@@ -338,7 +338,7 @@ def export_salary_data():
 
         # Format numeric columns
         numeric_columns = [
-            'Basic', 'Special Basic', 'DA', 'HRA', 'Overtime', 'Overtime Allowance',
+            'Basic', 'Leave Wages', 'National & Festival', 'Special Basic', 'DA', 'HRA', 'Overtime', 'Overtime Allowance',
             'Clothes', 'Others', 'Total Earnings', 'PF', 'ESIC', 'Society',
             'Income Tax', 'Insurance', 'Others Recoveries', 'Total Deductions', 'Net Salary'
         ]

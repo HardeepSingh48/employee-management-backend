@@ -34,6 +34,16 @@ class SalaryService:
     # }
 
     @staticmethod
+    def calculate_leave_wages(basic_salary):
+        """Leave wages = (Basic / 26) * (15.6 / 12)."""
+        return round((basic_salary / 26) * (15.6 / 12), 2) if basic_salary else 0.0
+
+    @staticmethod
+    def calculate_national_festival_wages(basic_salary):
+        """National & festival = (Basic / 26) * (8 / 12)."""
+        return round((basic_salary / 26) * (8 / 12), 2) if basic_salary else 0.0
+
+    @staticmethod
     def get_employee_daily_wage(employee_id):
         """
         Get daily wage for an employee from their salary code
@@ -242,8 +252,11 @@ class SalaryService:
                 insurance = 0
                 others_recoveries = 0
 
+                leave_wages = SalaryService.calculate_leave_wages(basic)
+                national_festival = SalaryService.calculate_national_festival_wages(basic)
+
                 # Calculate totals
-                total_earnings = basic + special_basic + da + hra + overtime_manual + overtime_allowance + others_earnings
+                total_earnings = basic + leave_wages + national_festival + special_basic + da + hra + overtime_manual + overtime_allowance + others_earnings
                 total_deductions = pf + esic + society + income_tax + insurance + others_recoveries + monthly_deduction_total
                 net_salary = total_earnings - total_deductions
 
@@ -255,6 +268,8 @@ class SalaryService:
                     'Present Days': present_days,
                     'Daily Wage': round(daily_wage, 2),
                     'Basic': round(basic, 2),
+                    'Leave Wages': round(leave_wages, 2),
+                    'National & Festival': round(national_festival, 2),
                     'Special Basic': round(special_basic, 2),
                     'DA': round(da, 2),
                     'HRA': round(hra, 2),
@@ -466,8 +481,11 @@ class SalaryService:
                 insurance = 0
                 others_recoveries = 0
                 
+                leave_wages = SalaryService.calculate_leave_wages(basic)
+                national_festival = SalaryService.calculate_national_festival_wages(basic)
+
                 # Calculate totals
-                total_earnings = basic + special_basic + da + hra + overtime_manual + overtime_allowance + others_earnings
+                total_earnings = basic + leave_wages + national_festival + special_basic + da + hra + overtime_manual + overtime_allowance + others_earnings
                 total_deductions = pf + esic + society + income_tax + insurance + others_recoveries + monthly_deduction_total
                 net_salary = total_earnings - total_deductions
                 
@@ -479,6 +497,8 @@ class SalaryService:
                     'Present Days': present_days,
                     'Daily Wage': round(daily_wage, 2),
                     'Basic': round(basic, 2),
+                    'Leave Wages': round(leave_wages, 2),
+                    'National & Festival': round(national_festival, 2),
                     'Special Basic': round(special_basic, 2),
                     'DA': round(da, 2),
                     'HRA': round(hra, 2),
@@ -543,7 +563,10 @@ class SalaryService:
             if not adj.empty:
                 df = pd.merge(df, adj, on='Employee ID', how='left')
 
-            earnings_cols = ['Special Basic', 'DA', 'HRA', 'Overtime', 'Overtime Allowance', 'Others']
+            df['Leave Wages'] = df['Basic'].apply(SalaryService.calculate_leave_wages)
+            df['National & Festival'] = df['Basic'].apply(SalaryService.calculate_national_festival_wages)
+
+            earnings_cols = ['Leave Wages', 'National & Festival', 'Special Basic', 'DA', 'HRA', 'Overtime', 'Overtime Allowance', 'Others']
             deduction_cols = ['Society', 'Income Tax', 'Insurance', 'Others Recoveries']
             for col in earnings_cols + deduction_cols:
                 if col not in df.columns:
@@ -674,7 +697,10 @@ class SalaryService:
             insurance = adjustments.get('Insurance', 0) if adjustments else 0
             others_recoveries = adjustments.get('Others Recoveries', 0) if adjustments else 0
 
-            total_earnings = basic + special_basic + da + hra + overtime + overtime_allowance + others_earnings
+            leave_wages = SalaryService.calculate_leave_wages(basic)
+            national_festival = SalaryService.calculate_national_festival_wages(basic)
+
+            total_earnings = basic + leave_wages + national_festival + special_basic + da + hra + overtime + overtime_allowance + others_earnings
             total_deductions = pf + esic + society + income_tax + insurance + others_recoveries
             
             monthly_deduction_total, deduction_details = SalaryService.get_monthly_deductions(employee_id, year, month)
@@ -689,6 +715,8 @@ class SalaryService:
                 'Present Days': days_present,
                 'Daily Wage': daily_wage,
                 'Basic': basic,
+                'Leave Wages': leave_wages,
+                'National & Festival': national_festival,
                 'Special Basic': special_basic,
                 'DA': da,
                 'HRA': hra,
@@ -927,8 +955,11 @@ class SalaryService:
                 insurance = 0
                 others_recoveries = 0
 
+                leave_wages = SalaryService.calculate_leave_wages(basic)
+                national_festival = SalaryService.calculate_national_festival_wages(basic)
+
                 # Calculate totals (matching individual calculation)
-                total_earnings = basic + special_basic + da + hra + overtime_manual + overtime_allowance + others_earnings
+                total_earnings = basic + leave_wages + national_festival + special_basic + da + hra + overtime_manual + overtime_allowance + others_earnings
                 total_deductions = pf + esic + society + income_tax + insurance + others_recoveries + monthly_deduction_total
                 net_salary = total_earnings - total_deductions
 
@@ -940,6 +971,8 @@ class SalaryService:
                     'Present Days': present_days,
                     'Daily Wage': round(daily_wage, 2),
                     'Basic': round(basic, 2),
+                    'Leave Wages': round(leave_wages, 2),
+                    'National & Festival': round(national_festival, 2),
                     'Special Basic': round(special_basic, 2),
                     'DA': round(da, 2),
                     'HRA': round(hra, 2),
@@ -1111,8 +1144,11 @@ class SalaryService:
                         else:
                             deduction_details[deduction_type] = installment
 
+                leave_wages = SalaryService.calculate_leave_wages(basic)
+                national_festival = SalaryService.calculate_national_festival_wages(basic)
+
                 # Calculate totals
-                total_earnings = basic + special_basic + da + hra + overtime_manual + overtime_allowance + others_earnings
+                total_earnings = basic + leave_wages + national_festival + special_basic + da + hra + overtime_manual + overtime_allowance + others_earnings
                 total_deductions = pf + esic + society + income_tax + insurance + others_recoveries + monthly_deduction_total
                 net_salary = total_earnings - total_deductions
 
@@ -1124,6 +1160,8 @@ class SalaryService:
                     'Present Days': present_days,
                     'Daily Wage': round(daily_wage, 2),
                     'Basic': round(basic, 2),
+                    'Leave Wages': round(leave_wages, 2),
+                    'National & Festival': round(national_festival, 2),
                     'Special Basic': round(special_basic, 2),
                     'DA': round(da, 2),
                     'HRA': round(hra, 2),
@@ -1408,8 +1446,11 @@ class SalaryService:
                         else:
                             deduction_details[deduction_type] = installment
 
+                leave_wages = SalaryService.calculate_leave_wages(basic_regular)
+                national_festival = SalaryService.calculate_national_festival_wages(basic_regular)
+
                 # Calculate REGULAR net salary
-                total_earnings_regular = basic_regular + overtime_allowance  # Only basic + overtime for regular
+                total_earnings_regular = basic_regular + leave_wages + national_festival + overtime_allowance
                 total_deductions_regular = pf + esic + monthly_deduction_total
                 net_salary_regular = total_earnings_regular - total_deductions_regular
 
@@ -1433,6 +1474,8 @@ class SalaryService:
                     'Present Days': present_days,
                     'Daily Wage': round(regular_daily_wage, 2),  # Show regular daily wage
                     'Basic': round(basic_regular, 2),  # Regular basic
+                    'Leave Wages': round(leave_wages, 2),
+                    'National & Festival': round(national_festival, 2),
                     'Overtime Allowance': round(overtime_allowance, 2),
                     'Total Earnings': round(total_earnings_regular, 2),  # Regular total earnings
                     'PF': round(pf, 2),
@@ -1578,7 +1621,9 @@ class SalaryService:
                     for d in deductions_by_employee[emp_id]:
                         monthly_deduction_total += d.get_installment_for_month(year, month)
 
-                total_earnings_regular = basic_regular + overtime_allowance
+                leave_wages = SalaryService.calculate_leave_wages(basic_regular)
+                national_festival = SalaryService.calculate_national_festival_wages(basic_regular)
+                total_earnings_regular = basic_regular + leave_wages + national_festival + overtime_allowance
                 total_deductions_regular = pf + esic + monthly_deduction_total
                 net_salary_regular = total_earnings_regular - total_deductions_regular
 
@@ -1597,6 +1642,8 @@ class SalaryService:
                     'Present Days': present_days,
                     'Daily Wage': round(emp['regular_daily_wage'], 2),
                     'Basic Salary': round(basic_regular, 2),
+                    'Leave Wages': round(leave_wages, 2),
+                    'National & Festival': round(national_festival, 2),
                     'Total Earnings': round(total_earnings_regular, 2),
                     'PF': round(pf, 2),
                     'ESIC': round(esic, 2),
@@ -1713,7 +1760,9 @@ class SalaryService:
                     for d in deductions_by_employee[emp_id]:
                         monthly_deduction_total += d.get_installment_for_month(year, month)
 
-                total_earnings_regular = basic_regular + overtime_allowance
+                leave_wages = SalaryService.calculate_leave_wages(basic_regular)
+                national_festival = SalaryService.calculate_national_festival_wages(basic_regular)
+                total_earnings_regular = basic_regular + leave_wages + national_festival + overtime_allowance
                 total_deductions_regular = pf + esic + monthly_deduction_total
                 net_salary_regular = total_earnings_regular - total_deductions_regular
 
@@ -1731,6 +1780,8 @@ class SalaryService:
                     'Present Days': present_days,
                     'Daily Wage': round(info['regular_daily_wage'], 2),
                     'Basic': round(basic_regular, 2),
+                    'Leave Wages': round(leave_wages, 2),
+                    'National & Festival': round(national_festival, 2),
                     'Overtime Allowance': round(overtime_allowance, 2),
                     'Total Earnings': round(total_earnings_regular, 2),
                     'PF': round(pf, 2),
@@ -1811,8 +1862,11 @@ class SalaryService:
                         else:
                             deduction_details[deduction_type] = installment
 
+                leave_wages = SalaryService.calculate_leave_wages(basic_regular)
+                national_festival = SalaryService.calculate_national_festival_wages(basic_regular)
+
                 # Calculate REGULAR net salary
-                total_earnings_regular = basic_regular + overtime_allowance  # Only basic + overtime for regular
+                total_earnings_regular = basic_regular + leave_wages + national_festival + overtime_allowance
                 total_deductions_regular = pf + esic + monthly_deduction_total
                 net_salary_regular = total_earnings_regular - total_deductions_regular
 
@@ -1836,6 +1890,8 @@ class SalaryService:
                     'Present Days': present_days,
                     'Daily Wage': round(regular_daily_wage, 2),  # Show regular daily wage
                     'Basic': round(basic_regular, 2),  # Regular basic
+                    'Leave Wages': round(leave_wages, 2),
+                    'National & Festival': round(national_festival, 2),
                     'Overtime Allowance': round(overtime_allowance, 2),
                     'Total Earnings': round(total_earnings_regular, 2),  # Regular total earnings
                     'PF': round(pf, 2),

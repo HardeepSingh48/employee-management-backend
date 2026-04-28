@@ -144,6 +144,12 @@ def generate_payslip_html(employee_data, year, month):
     # Primary earnings - always show Basic
     earnings.append(('Basic', salary_data.get('Basic', 0)))
 
+    if float(salary_data.get('Leave Wages', 0)) > 0:
+        earnings.append(('Leave Wages', salary_data.get('Leave Wages', 0)))
+
+    if float(salary_data.get('National & Festival', 0)) > 0:
+        earnings.append(('Nat/Festival', salary_data.get('National & Festival', 0)))
+
     # Additional earnings - show if > 0
     if float(salary_data.get('Special Basic', 0)) > 0:
         earnings.append(('Spl Basic', salary_data.get('Special Basic', 0)))
@@ -189,7 +195,7 @@ def generate_payslip_html(employee_data, year, month):
     overtime_fields_to_exclude = ['Overtime Shifts', 'Overtime Hours', 'Overtime Rate Hourly']
     for key, value in salary_data.items():
         if key not in ['Employee ID', 'Employee Name', 'Skill Level', 'Present Days', 'Daily Wage',
-                       'Basic', 'Special Basic', 'DA', 'HRA', 'Overtime', 'Overtime Allowance', 'Others', 'Total Earnings',
+                       'Basic', 'Leave Wages', 'National & Festival', 'Special Basic', 'DA', 'HRA', 'Overtime', 'Overtime Allowance', 'Others', 'Total Earnings',
                        'PF', 'ESIC', 'Society', 'Income Tax', 'Insurance', 'Others Recoveries',
                        'Total Deductions', 'Net Salary'] + overtime_fields_to_exclude and float(value) > 0:
             # Truncate long names for better fit
@@ -335,6 +341,12 @@ def generate_payslip_html_from_data(salary_data):
         # Primary earnings - always show Basic
         earnings.append(('Basic', salary_data.get('Basic', 0)))
 
+        if float(salary_data.get('Leave Wages', 0)) > 0:
+            earnings.append(('Leave Wages', salary_data.get('Leave Wages', 0)))
+
+        if float(salary_data.get('National & Festival', 0)) > 0:
+            earnings.append(('Nat/Festival', salary_data.get('National & Festival', 0)))
+
         # Additional earnings - show if > 0
         if float(salary_data.get('Special Basic', 0)) > 0:
             earnings.append(('Spl Basic', salary_data.get('Special Basic', 0)))
@@ -384,7 +396,7 @@ def generate_payslip_html_from_data(salary_data):
         overtime_fields_to_exclude = ['Overtime Shifts', 'Overtime Hours', 'Overtime Rate Hourly']
         for key, value in salary_data.items():
             if key not in ['Employee ID', 'Employee Name', 'Skill Level', 'Present Days', 'Daily Wage',
-                          'Basic', 'Special Basic', 'DA', 'HRA', 'Overtime', 'Overtime Allowance', 'Others', 'Total Earnings',
+                          'Basic', 'Leave Wages', 'National & Festival', 'Special Basic', 'DA', 'HRA', 'Overtime', 'Overtime Allowance', 'Others', 'Total Earnings',
                           'PF', 'ESIC', 'Society', 'Income Tax', 'Insurance', 'Others Recoveries', 'Other Deduction',
                           'Total Deductions', 'Net Salary'] + overtime_fields_to_exclude and float(value) > 0:
                 # Truncate long names for better fit
