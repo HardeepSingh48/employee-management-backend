@@ -6,6 +6,10 @@ from datetime import datetime, date, timedelta
 from sqlalchemy import and_, or_, func
 from sqlalchemy.exc import IntegrityError
 import calendar
+from utils.attendance_helpers import (
+    normalize_overtime_shifts_for_status,
+    sum_eligible_overtime_shifts_sql,
+)
 
 class AttendanceService:
     
@@ -129,6 +133,10 @@ class AttendanceService:
             if attendance_status == 'Absent':
                 total_hours_worked = 0.0
             # For Present, keep calculated or default 8.0
+
+            overtime_shifts = normalize_overtime_shifts_for_status(
+                attendance_status, overtime_shifts
+            )
 
             if existing_attendance:
                 # UPDATE existing record
@@ -302,7 +310,7 @@ class AttendanceService:
             summary_result = db.session.query(
                 func.count(case((Attendance.attendance_status == 'Present', 1))).label('present_days'),
                 func.count(case((Attendance.attendance_status == 'Absent', 1))).label('absent_days'),
-                func.sum(Attendance.overtime_shifts).label('total_overtime_shifts'),
+                sum_eligible_overtime_shifts_sql(),
                 func.count(Attendance.attendance_id).label('total_records')
             ).filter(
                 Attendance.employee_id == employee_id,
@@ -378,7 +386,7 @@ class AttendanceService:
                 Attendance.employee_id,
                 func.count(case((Attendance.attendance_status == 'Present', 1))).label('present_days'),
                 func.count(case((Attendance.attendance_status == 'Absent', 1))).label('absent_days'),
-                func.coalesce(func.sum(Attendance.overtime_shifts), 0).label('total_overtime_shifts'),
+                sum_eligible_overtime_shifts_sql(),
                 func.count(Attendance.attendance_id).label('total_records')
             ).filter(
                 Attendance.employee_id.in_(employee_ids),
@@ -498,7 +506,9 @@ class AttendanceService:
                     if emp_id in attendance_lookup and date_key in attendance_lookup[emp_id]:
                         record = attendance_lookup[emp_id][date_key]
                         status = record.attendance_status
-                        overtime = record.overtime_shifts
+                        overtime = normalize_overtime_shifts_for_status(
+                            status, record.overtime_shifts
+                        )
                         total_overtime += overtime
                     else:
                         status = 'Absent'
@@ -534,6 +544,33 @@ class AttendanceService:
             }
 
     @staticmethod
+    def clear_overtime_on_absent_days(employee_ids, year, month):
+        """
+        Zero stored overtime on Absent rows for the given employees/month.
+        Cleans legacy rows where status was set to Absent without clearing OT.
+        """
+        if not employee_ids:
+            return 0
+
+        first_day = date(year, month, 1)
+        last_day = date(year, month, calendar.monthrange(year, month)[1])
+
+        try:
+            updated = Attendance.query.filter(
+                Attendance.employee_id.in_(employee_ids),
+                Attendance.attendance_date >= first_day,
+                Attendance.attendance_date <= last_day,
+                Attendance.attendance_status == 'Absent',
+                Attendance.overtime_shifts > 0,
+            ).update({Attendance.overtime_shifts: 0}, synchronize_session=False)
+            db.session.commit()
+            return updated
+        except Exception as e:
+            db.session.rollback()
+            print(f"Error clearing overtime on absent days: {str(e)}")
+            return 0
+
+    @staticmethod
     def update_attendance(attendance_id, **kwargs):
         """
         Update existing attendance record
@@ -550,6 +587,10 @@ class AttendanceService:
             for field, value in kwargs.items():
                 if field in allowed_fields and hasattr(attendance, field):
                     setattr(attendance, field, value)
+
+            attendance.overtime_shifts = normalize_overtime_shifts_for_status(
+                attendance.attendance_status, attendance.overtime_shifts
+            )
 
             attendance.updated_date = datetime.now()
             attendance.updated_by = kwargs.get('updated_by', 'system')

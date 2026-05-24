@@ -168,6 +168,37 @@ STATUS_MAP = {
     'OFF': 'OFF'
 }
 
+# Overtime counts toward payroll only on worked / OT days (not plain absent days).
+OVERTIME_ELIGIBLE_STATUSES = ('Present', 'OFF')
+
+
+def is_overtime_eligible(attendance_status):
+    """Return True if overtime_shifts on this status should count toward payroll."""
+    return attendance_status in OVERTIME_ELIGIBLE_STATUSES
+
+
+def normalize_overtime_shifts_for_status(attendance_status, overtime_shifts):
+    """Enforce domain rule: Absent days always have zero overtime."""
+    if not is_overtime_eligible(attendance_status):
+        return 0.0
+    return float(overtime_shifts or 0.0)
+
+
+def sum_eligible_overtime_shifts_sql():
+    """SQLAlchemy expression: SUM(overtime_shifts) for Present/OFF rows only."""
+    from sqlalchemy import case, func
+    from models.attendance import Attendance
+
+    return func.coalesce(
+        func.sum(
+            case(
+                (Attendance.attendance_status.in_(OVERTIME_ELIGIBLE_STATUSES), Attendance.overtime_shifts),
+                else_=0,
+            )
+        ),
+        0,
+    ).label('total_overtime_shifts')
+
 
 def round_to_half(x):
     """Round to nearest 0.5 increment"""

@@ -197,8 +197,7 @@ def process_employee_batch(batch_data):
                             if existing:
                                 # Mark for update
                                 existing.attendance_status = attendance_value
-                                if day_overtime > 0:
-                                    existing.overtime_shifts = day_overtime
+                                existing.overtime_shifts = day_overtime
                                 existing.marked_by = marked_by
                                 existing.updated_by = current_user_email
                                 existing.updated_date = datetime.utcnow()
@@ -1566,8 +1565,7 @@ def bulk_mark_attendance_excel(current_user):
                                 if existing:
                                     # Mark for update
                                     existing.attendance_status = attendance_value
-                                    if day_overtime > 0:
-                                        existing.overtime_shifts = day_overtime
+                                    existing.overtime_shifts = day_overtime
                                     existing.marked_by = current_user.role
                                     existing.updated_by = current_user.email
                                     existing.updated_date = datetime.utcnow()
@@ -1678,6 +1676,14 @@ def bulk_mark_attendance_excel(current_user):
 
             # Final commit
             db.session.commit()
+
+            # Clean legacy OT left on Absent rows for this upload scope
+            processed_employee_ids = [emp.employee_id for emp in employee_dict.values()]
+            cleared = AttendanceService.clear_overtime_on_absent_days(
+                processed_employee_ids, year, month
+            )
+            if cleared:
+                logger.info(f"Cleared overtime on {cleared} absent day record(s) after bulk upload")
 
         except Exception as e:
             db.session.rollback()

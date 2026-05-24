@@ -2,6 +2,7 @@ from models import db
 from sqlalchemy.sql import func
 from datetime import datetime, time
 import uuid
+from utils.attendance_helpers import normalize_overtime_shifts_for_status
 
 class Attendance(db.Model):
     __tablename__ = "attendance"
@@ -38,9 +39,16 @@ class Attendance(db.Model):
     employee = db.relationship("Employee", backref="attendance_records")
 
     @property
+    def effective_overtime_shifts(self):
+        """Overtime that counts for payroll/display (zero on Absent)."""
+        return normalize_overtime_shifts_for_status(
+            self.attendance_status, self.overtime_shifts
+        )
+
+    @property
     def overtime_hours(self):
-        """Computed property: convert overtime shifts to hours"""
-        return (self.overtime_shifts or 0.0) * 8
+        """Computed property: convert effective overtime shifts to hours"""
+        return self.effective_overtime_shifts * 8
 
     def to_dict(self):
         """Convert attendance record to dictionary"""
@@ -51,8 +59,8 @@ class Attendance(db.Model):
             'check_in_time': self.check_in_time.isoformat() if self.check_in_time else None,
             'check_out_time': self.check_out_time.isoformat() if self.check_out_time else None,
             'attendance_status': self.attendance_status,
-            'overtime_shifts': self.overtime_shifts,
-            'overtime_hours': self.overtime_hours,  # Computed property
+            'overtime_shifts': self.effective_overtime_shifts,
+            'overtime_hours': self.overtime_hours,
             'late_minutes': self.late_minutes,
             'early_departure_minutes': self.early_departure_minutes,
             'total_hours_worked': self.total_hours_worked,

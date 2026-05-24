@@ -8,6 +8,7 @@ from datetime import datetime, date
 from sqlalchemy import and_, func, case
 import pandas as pd
 import calendar
+from utils.attendance_helpers import sum_eligible_overtime_shifts_sql
 
 class SalaryService:
 
@@ -164,7 +165,7 @@ class SalaryService:
                 Attendance.employee_id,
                 func.count(case((Attendance.attendance_status == 'Present', 1))).label('present_days'),
                 func.count(case((Attendance.attendance_status == 'Absent', 1))).label('absent_days'),
-                func.coalesce(func.sum(Attendance.overtime_shifts), 0).label('total_overtime_shifts')
+                sum_eligible_overtime_shifts_sql()
             ).filter(
                 Attendance.employee_id.in_(employee_ids),
                 Attendance.attendance_date >= first_day,
@@ -393,7 +394,7 @@ class SalaryService:
                 Attendance.employee_id,
                 func.count(case((Attendance.attendance_status == 'Present', 1))).label('present_days'),
                 func.count(case((Attendance.attendance_status == 'Absent', 1))).label('absent_days'),
-                func.coalesce(func.sum(Attendance.overtime_shifts), 0).label('total_overtime_shifts')
+                sum_eligible_overtime_shifts_sql()
             ).filter(
                 Attendance.employee_id.in_(employee_ids),
                 Attendance.attendance_date >= first_day,
@@ -873,7 +874,7 @@ class SalaryService:
                 Attendance.employee_id,
                 func.count(case((Attendance.attendance_status == 'Present', 1))).label('present_days'),
                 func.count(case((Attendance.attendance_status == 'Absent', 1))).label('absent_days'),
-                func.coalesce(func.sum(Attendance.overtime_shifts), 0).label('total_overtime_shifts')
+                sum_eligible_overtime_shifts_sql()
             ).filter(
                 Attendance.employee_id.in_(employee_ids),
                 Attendance.attendance_date >= first_day,
@@ -1062,7 +1063,7 @@ class SalaryService:
                 Attendance.employee_id,
                 func.count(case((Attendance.attendance_status == 'Present', 1))).label('present_days'),
                 func.count(case((Attendance.attendance_status == 'Absent', 1))).label('absent_days'),
-                func.coalesce(func.sum(Attendance.overtime_shifts), 0).label('total_overtime_shifts')
+                sum_eligible_overtime_shifts_sql()
             ).filter(
                 Attendance.employee_id.in_(employee_ids),
                 Attendance.attendance_date >= first_day,
@@ -1369,7 +1370,7 @@ class SalaryService:
                 Attendance.employee_id,
                 func.count(case((Attendance.attendance_status == 'Present', 1))).label('present_days'),
                 func.count(case((Attendance.attendance_status == 'Absent', 1))).label('absent_days'),
-                func.coalesce(func.sum(Attendance.overtime_shifts), 0).label('total_overtime_shifts')
+                sum_eligible_overtime_shifts_sql()
             ).filter(
                 Attendance.employee_id.in_(employee_ids),
                 Attendance.attendance_date >= first_day,
@@ -1570,7 +1571,7 @@ class SalaryService:
                 Attendance.employee_id,
                 func.count(case((Attendance.attendance_status == 'Present', 1))).label('present_days'),
                 func.count(case((Attendance.attendance_status == 'Absent', 1))).label('absent_days'),
-                func.coalesce(func.sum(Attendance.overtime_shifts), 0).label('total_overtime_shifts')
+                sum_eligible_overtime_shifts_sql()
             ).filter(
                 Attendance.employee_id.in_(employee_ids),
                 Attendance.attendance_date >= first_day,
@@ -1719,7 +1720,7 @@ class SalaryService:
             attendance_summary = db.session.query(
                 Attendance.employee_id,
                 func.count(case((Attendance.attendance_status == 'Present', 1))).label('present_days'),
-                func.coalesce(func.sum(Attendance.overtime_shifts), 0).label('total_overtime_shifts')
+                sum_eligible_overtime_shifts_sql()
             ).filter(
                 Attendance.employee_id.in_(employee_ids),
                 Attendance.attendance_date >= first_day,

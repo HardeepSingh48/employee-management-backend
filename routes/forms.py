@@ -157,6 +157,8 @@ def get_form_b_data():
                 "totalDays": present_days + (overtime_hours / 8),  # Convert OT hours to days
                 "grossEarnings": {
                     "bs": salary_data.get('Basic', 0),
+                    "leaveWages": salary_data.get('Leave Wages', 0),
+                    "nationalFestival": salary_data.get('National & Festival', 0),
                     "da": salary_data.get('DA', 0),
                     "hra": salary_data.get('HRA', 0),
                     "cov": 0,  # Conveyance allowance
@@ -331,6 +333,8 @@ def get_form_b_special_wages():
                 "totalDays": total_days,
                 "grossEarnings": {
                     "bs": s.get('Basic', 0),
+                    "leaveWages": s.get('Leave Wages', 0) or 0,
+                    "nationalFestival": s.get('National & Festival', 0) or 0,
                     "da": s.get('DA', 0) or 0,
                     "hra": s.get('HRA', 0) or 0,
                     "cov": 0,
@@ -442,6 +446,8 @@ def download_form_b_excel():
                     'Overtime': row['overtime'],
                     'Total Days': row['totalDays'],
                     'BS': row['grossEarnings']['bs'],
+                    'Leave Wages': row['grossEarnings'].get('leaveWages', 0),
+                    'National & Festival': row['grossEarnings'].get('nationalFestival', 0),
                     'DA': row['grossEarnings']['da'],
                     'HRA': row['grossEarnings']['hra'],
                     'COV': row['grossEarnings']['cov'],
@@ -471,6 +477,8 @@ def download_form_b_excel():
                 'Overtime': totals['totalOvertime'],
                 'Total Days': '',
                 'BS': '',
+                'Leave Wages': '',
+                'National & Festival': '',
                 'DA': '',
                 'HRA': '',
                 'COV': '',
@@ -514,11 +522,11 @@ def download_form_b_excel():
                 cell.alignment = Alignment(horizontal='center')
 
             # Merge cells for headers to span across columns
-            worksheet.merge_cells('A1:X1')  # Form B
-            worksheet.merge_cells('A2:X2')  # Format For Wage Register
-            worksheet.merge_cells('A3:X3')  # Rate of minimum wages with date
-            worksheet.merge_cells('A4:X4')  # SSPL
-            worksheet.merge_cells('A5:X5')  # Month and Site info
+            worksheet.merge_cells('A1:Z1')  # Form B
+            worksheet.merge_cells('A2:Z2')  # Format For Wage Register
+            worksheet.merge_cells('A3:Z3')  # Rate of minimum wages with date
+            worksheet.merge_cells('A4:Z4')  # SSPL
+            worksheet.merge_cells('A5:Z5')  # Month and Site info
         
         output.seek(0)
         
