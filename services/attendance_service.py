@@ -447,21 +447,22 @@ class AttendanceService:
 
 
             # Get all employees in the site, sorted by employee_id
+            # Prefer joining on WageMaster.site_id; include employees with Employee.site_id as fallback
             employees = Employee.query.join(
                 WageMaster, Employee.salary_code == WageMaster.salary_code
-            ).join(
-                Site, WageMaster.site_name == Site.site_name
+            ).outerjoin(
+                Site, WageMaster.site_id == Site.site_id
             ).filter(
-                Site.site_id == site_id
+                or_(WageMaster.site_id == site_id, Employee.site_id == site_id)
             ).order_by(Employee.employee_id.asc()).all()
 
             # Get all attendance records for the date range and site
             attendance_records = Attendance.query.join(Employee).join(
                 WageMaster, Employee.salary_code == WageMaster.salary_code
-            ).join(
-                Site, WageMaster.site_name == Site.site_name
+            ).outerjoin(
+                Site, WageMaster.site_id == Site.site_id
             ).filter(
-                Site.site_id == site_id,
+                or_(WageMaster.site_id == site_id, Employee.site_id == site_id),
                 Attendance.attendance_date >= start_date,
                 Attendance.attendance_date <= end_date
             ).all()

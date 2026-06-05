@@ -17,24 +17,33 @@ depends_on = None
 
 
 def upgrade():
-    # Add soft delete columns to the employees table
+    # Check existing columns first to avoid DuplicateColumn errors
+    from sqlalchemy.engine import reflection
+    connection = op.get_bind()
+    inspector = reflection.Inspector.from_engine(connection)
+    columns = [col['name'] for col in inspector.get_columns('employees')]
+
+    # Add soft delete columns to the employees table if they don't exist
     with op.batch_alter_table('employees', schema=None) as batch_op:
-        batch_op.add_column(sa.Column(
-            'is_deleted',
-            sa.Boolean(),
-            nullable=False,
-            server_default=sa.text('false')
-        ))
-        batch_op.add_column(sa.Column(
-            'deleted_at',
-            sa.DateTime(timezone=True),
-            nullable=True
-        ))
-        batch_op.add_column(sa.Column(
-            'left_on',
-            sa.Date(),
-            nullable=True
-        ))
+        if 'is_deleted' not in columns:
+            batch_op.add_column(sa.Column(
+                'is_deleted',
+                sa.Boolean(),
+                nullable=False,
+                server_default=sa.text('false')
+            ))
+        if 'deleted_at' not in columns:
+            batch_op.add_column(sa.Column(
+                'deleted_at',
+                sa.DateTime(timezone=True),
+                nullable=True
+            ))
+        if 'left_on' not in columns:
+            batch_op.add_column(sa.Column(
+                'left_on',
+                sa.Date(),
+                nullable=True
+            ))
 
 
 def downgrade():

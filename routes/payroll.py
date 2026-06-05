@@ -15,7 +15,7 @@ import tempfile
 import uuid
 import logging
 from functools import wraps
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from services.pdf_service import generate_payroll_pdf
 
 logger = logging.getLogger(__name__)
@@ -1197,7 +1197,7 @@ def get_employees_for_payroll(current_user):
                 from models.site import Site
                 supervisor_site = Site.query.filter_by(site_id=current_user.site_id).first()
                 if supervisor_site:
-                    base_query = base_query.filter(WageMaster.site_name == supervisor_site.site_name)
+                    base_query = base_query.filter(or_(WageMaster.site_id == current_user.site_id, Employee.site_id == current_user.site_id))
                 else:
                     return jsonify({
                         'success': True,
@@ -1215,7 +1215,7 @@ def get_employees_for_payroll(current_user):
             from models.site import Site
             selected_site = Site.query.filter_by(site_id=site_id).first()
             if selected_site:
-                base_query = base_query.filter(WageMaster.site_name == selected_site.site_name)
+                base_query = base_query.filter(or_(WageMaster.site_id == site_id, Employee.site_id == site_id))
             else:
                 return jsonify({
                     'success': True,
@@ -1401,7 +1401,7 @@ def calculate_bonus(current_user):
             if current_user.site_id:
                 site = Site.query.filter_by(site_id=current_user.site_id).first()
                 if site:
-                    site_salary_codes = WageMaster.query.filter_by(site_name=site.site_name).with_entities(WageMaster.salary_code).all()
+                    site_salary_codes = WageMaster.query.filter_by(site_id=site.site_id).with_entities(WageMaster.salary_code).all()
                     site_salary_codes = [code[0] for code in site_salary_codes]
 
                     if site_salary_codes:
@@ -1419,7 +1419,7 @@ def calculate_bonus(current_user):
         elif site_id:
             site = Site.query.filter_by(site_id=site_id).first()
             if site:
-                site_salary_codes = WageMaster.query.filter_by(site_name=site.site_name).with_entities(WageMaster.salary_code).all()
+                site_salary_codes = WageMaster.query.filter_by(site_id=site.site_id).with_entities(WageMaster.salary_code).all()
                 site_salary_codes = [code[0] for code in site_salary_codes]
 
                 if site_salary_codes:

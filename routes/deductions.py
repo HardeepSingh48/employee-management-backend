@@ -29,8 +29,9 @@ def get_deductions(current_user):
             site = Site.query.filter_by(site_id=site_id).first()
             if site:
                 # Get salary codes for the selected site
-                site_salary_codes = WageMaster.query.filter_by(site_name=site.site_name).with_entities(WageMaster.salary_code).all()
+                site_salary_codes = WageMaster.query.filter_by(site_id=site_id).with_entities(WageMaster.salary_code).all()
                 site_salary_codes = [code[0] for code in site_salary_codes]
+
 
                 if site_salary_codes:
                     query = query.filter(Employee.salary_code.in_(site_salary_codes))

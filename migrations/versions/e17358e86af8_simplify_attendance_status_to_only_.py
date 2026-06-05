@@ -40,6 +40,9 @@ def upgrade():
         batch_op.drop_index(batch_op.f('idx_wage_master_salary_code'))
         batch_op.drop_index(batch_op.f('idx_wage_master_site_name'))
 
+    # Drop constraint if it already exists to prevent duplicate constraint errors
+    op.execute("ALTER TABLE attendance DROP CONSTRAINT IF EXISTS check_attendance_status")
+
     # Add constraint to limit attendance_status to only 'Present', 'Absent', and 'OFF'
     op.create_check_constraint(
         'check_attendance_status',

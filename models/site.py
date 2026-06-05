@@ -29,3 +29,33 @@ class Site(db.Model):
     
     def __repr__(self):
         return f"<Site {self.site_id} - {self.site_name}>"
+    
+    @classmethod
+    def get_or_create_site(cls, site_name: str, state: str, created_by: str = "system") -> "Site":
+        """Get a site by name (case-insensitive, trimmed) or create it if not found."""
+        from sqlalchemy import func
+        import uuid
+        
+        site_name_clean = site_name.strip()
+        state_clean = state.strip() if state else "Unknown"
+        
+        # Look for site by name (case-insensitive, trimmed)
+        site = cls.query.filter(
+            func.trim(func.lower(cls.site_name)) == func.trim(func.lower(site_name_clean))
+        ).first()
+        
+        if not site:
+            # Create a new site
+            site_id = f"SITE-{uuid.uuid4().hex[:8].upper()}"
+            site = cls(
+                site_id=site_id,
+                site_name=site_name_clean,
+                state=state_clean,
+                is_active=True,
+                created_by=created_by
+            )
+            db.session.add(site)
+            # Flush to get the site_id and ensure it's queryable in the transaction
+            db.session.flush()
+            
+        return site
