@@ -565,7 +565,8 @@ def update_salary_code(current_user, salary_code):
 @salary_codes_bp.route("/<salary_code>", methods=["DELETE"])
 @token_required
 def delete_salary_code(current_user, salary_code):
-    """Soft delete salary code"""
+    """Soft delete salary code. Also removes the parent site if it becomes
+    fully orphaned (no active salary codes, no employees) after the deletion."""
     # Role-based access control - only superadmin and admin1 can delete salary codes
     if current_user.role not in ['superadmin', 'admin1', 'admin']:
         return jsonify({
@@ -578,12 +579,23 @@ def delete_salary_code(current_user, salary_code):
         if not wage:
             return jsonify({"success": False, "message": "Salary code not found"}), 404
 
+        site_id = wage.site_id  # Capture before deactivation
+
+        # Soft-delete the salary code
         wage.is_active = False
+
+        # Auto-clean the site if it now has no active salary codes and no employees
+        site_deleted = False
+        if site_id:
+            from models.site import Site
+            site_deleted = Site.cleanup_if_orphaned(site_id)
+
         db.session.commit()
         
         return jsonify({
             "success": True,
-            "message": "Salary code deleted successfully"
+            "message": "Salary code deleted successfully",
+            "site_removed": site_deleted  # Informs the frontend if the site was also removed
         }), 200
     except Exception as e:
         db.session.rollback()

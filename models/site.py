@@ -58,4 +58,33 @@ class Site(db.Model):
             # Flush to get the site_id and ensure it's queryable in the transaction
             db.session.flush()
             
-        return site
+        return site
+
+    @classmethod
+    def cleanup_if_orphaned(cls, site_id: str) -> bool:
+        """Delete a site if it has no active wage masters and no employees.
+        
+        Returns True if the site was deleted, False if it still has references.
+        Should be called after deleting/deactivating wage masters.
+        """
+        from models.wage_master import WageMaster
+        from models.employee import Employee
+
+        site = cls.query.get(site_id)
+        if not site:
+            return False
+
+        active_wage_masters = WageMaster.query.filter_by(
+            site_id=site_id, is_active=True
+        ).count()
+
+        if active_wage_masters > 0:
+            return False  # Still has salary codes — keep the site
+
+        employee_count = Employee.query.filter_by(site_id=site_id).count()
+        if employee_count > 0:
+            return False  # Still has employees — keep the site
+
+        db.session.delete(site)
+        return True
+
