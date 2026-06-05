@@ -9,6 +9,7 @@ from datetime import datetime, date
 import pandas as pd
 import io
 import calendar
+from sqlalchemy import or_
 
 forms_bp = Blueprint("forms", __name__)
 
@@ -47,9 +48,19 @@ def get_form_b_data():
             decoded_site = unquote(site)
             print(f"[DEBUG] Filtering by site: '{site}' -> '{decoded_site}'")
 
-            # Join with WageMaster to filter by site
-            query = query.join(WageMaster, Employee.salary_code == WageMaster.salary_code)\
-                         .filter(WageMaster.site_name == decoded_site)
+            # Try to resolve site by name to use site_id for robust filtering
+            from models.site import Site
+            resolved_site = Site.query.filter(Site.site_name.ilike(decoded_site)).first()
+            if resolved_site:
+                site_id_val = resolved_site.site_id
+                query = query.join(WageMaster, Employee.salary_code == WageMaster.salary_code).filter(
+                    or_(WageMaster.site_id == site_id_val, Employee.site_id == site_id_val)
+                )
+            else:
+                # Fallback to matching on site_name (case-insensitive) if site_id not resolvable
+                query = query.join(WageMaster, Employee.salary_code == WageMaster.salary_code).filter(
+                    WageMaster.site_name.ilike(decoded_site)
+                )
 
         # Apply sorting and execute query (for both site-filtered and all employees)
         employees = query.order_by(Employee.employee_id.asc()).all()

@@ -126,6 +126,7 @@ def list_salary_codes(current_user):
                 "id": wage.id,
                 "salary_code": wage.salary_code,
                 "site_name": wage.site_name,
+                "site_id": wage.site_id,
                 "rank": wage.rank,
                 "state": wage.state,
                 "base_wage": wage.base_wage,
@@ -239,9 +240,20 @@ def create_salary_code(current_user):
         # Set default skill level - will be updated during employee registration
         skill_level = "Not Specified"  # Default value, will be set when employee is registered
 
+        # Resolve or create site from site_name
+        from models.site import Site
+        site = Site.get_or_create_site(
+            payload["site_name"],
+            payload["state"],
+            created_by=current_user.email
+        )
+        site_id_val = site.site_id
+
+
         wage_master = WageMaster(
             salary_code=salary_code,
             site_name=payload["site_name"],
+            site_id=site_id_val,
             rank=payload["rank"],
             state=payload["state"],
             base_wage=float(payload["base_wage"]),
@@ -260,6 +272,7 @@ def create_salary_code(current_user):
                 "id": wage_master.id,
                 "salary_code": wage_master.salary_code,
                 "site_name": wage_master.site_name,
+                "site_id": wage_master.site_id,
                 "rank": wage_master.rank,
                 "state": wage_master.state,
                 "base_wage": wage_master.base_wage,
@@ -294,6 +307,11 @@ def bulk_create_salary_codes(current_user):
         if not salary_codes_data:
             return jsonify({"success": False, "message": "salary_codes array is required"}), 400
 
+        # Pre-cache sites for efficient lookups
+        from models.site import Site
+        sites = Site.query.all()
+        site_map = {s.site_name.strip().lower(): s.site_id for s in sites}
+
         created_codes = []
         errors = []
 
@@ -325,9 +343,26 @@ def bulk_create_salary_codes(current_user):
                     code_data["state"]
                 )
 
+                # Resolve or create site on the fly
+                site_name_val = code_data["site_name"]
+                state_val = code_data.get("state", "Unknown")
+                site_key = str(site_name_val).strip().lower()
+                
+                if site_key in site_map:
+                    site_id_val = site_map[site_key]
+                else:
+                    site = Site.get_or_create_site(
+                        site_name_val,
+                        state_val,
+                        created_by=current_user.email
+                    )
+                    site_id_val = site.site_id
+                    site_map[site_key] = site_id_val
+
                 wage_master = WageMaster(
                     salary_code=salary_code,
                     site_name=code_data["site_name"],
+                    site_id=site_id_val,
                     rank=code_data["rank"],
                     state=code_data["state"],
                     base_wage=float(code_data["base_wage"]),
@@ -340,6 +375,7 @@ def bulk_create_salary_codes(current_user):
                 created_codes.append({
                     "salary_code": salary_code,
                     "site_name": code_data["site_name"],
+                    "site_id": site_id_val,
                     "rank": code_data["rank"],
                     "state": code_data["state"],
                     "base_wage": float(code_data["base_wage"])
@@ -422,6 +458,7 @@ def get_salary_code(current_user, salary_code):
                 "id": wage.id,
                 "salary_code": wage.salary_code,
                 "site_name": wage.site_name,
+                "site_id": wage.site_id,
                 "rank": wage.rank,
                 "state": wage.state,
                 "base_wage": wage.base_wage,
@@ -485,6 +522,18 @@ def update_salary_code(current_user, salary_code):
         wage.skill_level = payload.get("skill_level", wage.skill_level)
         wage.sspl_wages = float(payload.get("sspl_wages", wage.sspl_wages)) if payload.get("sspl_wages") is not None else wage.sspl_wages
 
+        # If site_name changed, resolve or create site and set site_id
+        if "site_name" in payload:
+            from models.site import Site
+            state_val = payload.get("state", wage.state)
+            site = Site.get_or_create_site(
+                payload["site_name"],
+                state_val,
+                created_by=current_user.email
+            )
+            wage.site_id = site.site_id
+
+
         # Regenerate salary code if site/rank/state changed (only if no employees are using it)
         if employee_count == 0:
             new_salary_code = _generate_salary_code(wage.site_name, wage.rank, wage.state)
@@ -500,6 +549,7 @@ def update_salary_code(current_user, salary_code):
                 "id": wage.id,
                 "salary_code": wage.salary_code,
                 "site_name": wage.site_name,
+                "site_id": wage.site_id,
                 "rank": wage.rank,
                 "state": wage.state,
                 "base_wage": wage.base_wage,
@@ -515,7 +565,8 @@ def update_salary_code(current_user, salary_code):
 @salary_codes_bp.route("/<salary_code>", methods=["DELETE"])
 @token_required
 def delete_salary_code(current_user, salary_code):
-    """Soft delete salary code"""
+    """Soft delete salary code. Also removes the parent site if it becomes
+    fully orphaned (no active salary codes, no employees) after the deletion."""
     # Role-based access control - only superadmin and admin1 can delete salary codes
     if current_user.role not in ['superadmin', 'admin1', 'admin']:
         return jsonify({
@@ -528,12 +579,23 @@ def delete_salary_code(current_user, salary_code):
         if not wage:
             return jsonify({"success": False, "message": "Salary code not found"}), 404
 
+        site_id = wage.site_id  # Capture before deactivation
+
+        # Soft-delete the salary code
         wage.is_active = False
+
+        # Auto-clean the site if it now has no active salary codes and no employees
+        site_deleted = False
+        if site_id:
+            from models.site import Site
+            site_deleted = Site.cleanup_if_orphaned(site_id)
+
         db.session.commit()
         
         return jsonify({
             "success": True,
-            "message": "Salary code deleted successfully"
+            "message": "Salary code deleted successfully",
+            "site_removed": site_deleted  # Informs the frontend if the site was also removed
         }), 200
     except Exception as e:
         db.session.rollback()

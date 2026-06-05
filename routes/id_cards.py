@@ -77,7 +77,7 @@ def preview_bulk(current_user):
 
             if site:
                 # Get all salary codes for this site
-                site_salary_codes = WageMaster.query.filter_by(site_name=site.site_name).all()
+                site_salary_codes = WageMaster.query.filter_by(site_id=site.site_id).all()
                 salary_code_list = [sc.salary_code for sc in site_salary_codes]
                 print(f"DEBUG: Salary codes for site: {salary_code_list}")
 
@@ -393,7 +393,7 @@ def generate_bulk(current_user):
 
             if site:
                 # Get all salary codes for this site
-                site_salary_codes = WageMaster.query.filter_by(site_name=site.site_name).all()
+                site_salary_codes = WageMaster.query.filter_by(site_id=site.site_id).all()
                 salary_code_list = [sc.salary_code for sc in site_salary_codes]
                 print(f"DEBUG: Salary codes for site: {salary_code_list}")
 

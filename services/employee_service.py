@@ -114,10 +114,16 @@ def _get_or_create_wage_master(site_name: str, rank: str, state: str, base_salar
     # Generate salary code
     salary_code = _generate_salary_code(site_name, rank, state)
 
+    # Resolve or create site from site_name
+    site = Site.get_or_create_site(site_name, state)
+    site_id_val = site.site_id
+
+
     # Create new
     wm = WageMaster(
         salary_code=salary_code,
         site_name=site_name,
+        site_id=site_id_val,
         rank=rank,
         state=state,
         base_wage=base_salary or 0,

@@ -17,6 +17,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from utils.attendance_helpers import round_to_half, normalize_attendance_value, is_date, parse_date_from_column
 from utils.file_validators import validate_excel_file, validate_excel_structure, validate_employee_data, validate_attendance_data
 from utils.performance_utils import PerformanceMonitor, memory_efficient_gc, optimize_dataframe_memory
+from sqlalchemy import or_
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -33,7 +34,7 @@ def batch_load_employees(employee_ids, site_id=None, user_role='admin'):
         query = Employee.query.join(
             WageMaster, Employee.salary_code == WageMaster.salary_code
         ).join(
-            Site, WageMaster.site_name == Site.site_name
+            Site, WageMaster.site_id == Site.site_id
         ).filter(
             Employee.employee_id.in_(employee_ids),
             Site.site_id == site_id
@@ -342,7 +343,7 @@ def mark_attendance(current_user):
             employee = Employee.query.join(
                 WageMaster, Employee.salary_code == WageMaster.salary_code
             ).join(
-                Site, WageMaster.site_name == Site.site_name
+                Site, WageMaster.site_id == Site.site_id
             ).filter(
                 Employee.employee_id == employee_id,
                 Site.site_id == current_user.site_id
@@ -469,7 +470,7 @@ def bulk_mark_attendance(current_user):
                 employee = Employee.query.join(
                     WageMaster, Employee.salary_code == WageMaster.salary_code
                 ).join(
-                    Site, WageMaster.site_name == Site.site_name
+                    Site, WageMaster.site_id == Site.site_id
                 ).filter(
                     Employee.employee_id == record.get('employee_id'),
                     Site.site_id == current_user.site_id
@@ -553,7 +554,7 @@ def get_site_employees(current_user):
             query = query.join(
                 WageMaster, Employee.salary_code == WageMaster.salary_code
             ).join(
-                Site, WageMaster.site_name == Site.site_name
+                Site, WageMaster.site_id == Site.site_id
             ).filter(Site.site_id == current_user.site_id)
         # For admins, no additional filtering needed
 
@@ -654,7 +655,7 @@ def get_site_attendance(current_user):
             query = query.join(
                 WageMaster, Employee.salary_code == WageMaster.salary_code
             ).join(
-                Site, WageMaster.site_name == Site.site_name
+                Site, WageMaster.site_id == Site.site_id
             ).filter(Site.site_id == current_user.site_id)
         else:
             # Admin: optionally filter by provided site_id through salary codes
@@ -664,7 +665,7 @@ def get_site_attendance(current_user):
                 query = query.join(
                     WageMaster, Employee.salary_code == WageMaster.salary_code
                 ).join(
-                    Site, WageMaster.site_name == Site.site_name
+                    Site, WageMaster.site_id == Site.site_id
                 ).filter(Site.site_id == site_id)
 
         # Apply filters
@@ -958,7 +959,7 @@ def bulk_upload_attendance(current_user):
                     site_check = Employee.query.join(
                         WageMaster, Employee.salary_code == WageMaster.salary_code
                     ).join(
-                        Site, WageMaster.site_name == Site.site_name
+                        Site, WageMaster.site_id == Site.site_id
                     ).filter(
                         Employee.employee_id == employee_id,
                         Site.site_id == current_user.site_id
@@ -1044,26 +1045,30 @@ def download_attendance_template(current_user):
     try:
         # Resolve employees for the requested site through salary code relationships
         if site_param:
-            # Join Employee -> WageMaster -> Site to filter by site_id
+            # Prefer joining on explicit site_id in WageMaster; fallback to employee.site_id
             from models.wage_master import WageMaster
             from models.site import Site
             employees = Employee.query.join(
                 WageMaster, Employee.salary_code == WageMaster.salary_code
-            ).join(
-                Site, WageMaster.site_name == Site.site_name
-            ).filter(Site.site_id == site_param).order_by(Employee.employee_id.asc()).all()
-            logger.info(f"Loading employees for site {site_param} via salary codes: {len(employees)} found")
+            ).outerjoin(
+                Site, WageMaster.site_id == Site.site_id
+            ).filter(
+                or_(WageMaster.site_id == site_param, Employee.site_id == site_param)
+            ).order_by(Employee.employee_id.asc()).all()
+            logger.info(f"Loading employees for site {site_param} via salary codes/site_id: {len(employees)} found")
         else:
             if current_user.role == 'supervisor' and current_user.site_id:
-                # For supervisors, filter by their assigned site through salary codes
+                # For supervisors, prefer site_id join and include employees with employee.site_id
                 from models.wage_master import WageMaster
                 from models.site import Site
                 employees = Employee.query.join(
                     WageMaster, Employee.salary_code == WageMaster.salary_code
-                ).join(
-                    Site, WageMaster.site_name == Site.site_name
-                ).filter(Site.site_id == current_user.site_id).order_by(Employee.employee_id.asc()).all()
-                logger.info(f"Loading employees for supervisor site {current_user.site_id} via salary codes: {len(employees)} found")
+                ).outerjoin(
+                    Site, WageMaster.site_id == Site.site_id
+                ).filter(
+                    or_(WageMaster.site_id == current_user.site_id, Employee.site_id == current_user.site_id)
+                ).order_by(Employee.employee_id.asc()).all()
+                logger.info(f"Loading employees for supervisor site {current_user.site_id} via salary codes/site_id: {len(employees)} found")
             else:
                 # For admin users without site filter, load all employees
                 employees = Employee.query.order_by(Employee.employee_id.asc()).all()
@@ -1096,9 +1101,11 @@ def download_attendance_template(current_user):
         
         for emp in employees:
             # Create base employee data
+            # Build name with fallback to employee_id when names are missing
+            emp_name = (f"{getattr(emp, 'first_name', '') or ''} {getattr(emp, 'last_name', '') or ''}".strip()) or str(getattr(emp, 'employee_id', ''))
             employee_row = {
                 'Employee ID': getattr(emp, 'employee_id', ''),
-                'Employee Name': f"{getattr(emp, 'first_name', '')} {getattr(emp, 'last_name', '')}".strip(),
+                'Employee Name': emp_name,
             }
 
             # Add all date columns for current month

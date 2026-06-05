@@ -7,6 +7,8 @@ class WageMaster(db.Model):
     id = db.Column(db.Integer, primary_key=True, index=True)
     salary_code = db.Column(db.String(50), unique=True, nullable=False, index=True)
     site_name = db.Column(db.String(100), nullable=False)
+    # Prefer explicit FK to sites to avoid brittle string joins
+    site_id = db.Column(db.String(50), db.ForeignKey('sites.site_id'), nullable=True, index=True)
     rank = db.Column(db.String(50), nullable=False)
     state = db.Column(db.String(50), nullable=False)
     base_wage = db.Column(db.Float, nullable=False)

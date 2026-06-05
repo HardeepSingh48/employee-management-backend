@@ -5,7 +5,7 @@ from models.wage_master import WageMaster
 from models.holiday import Holiday
 from models.deduction import Deduction
 from datetime import datetime, date
-from sqlalchemy import and_, func, case
+from sqlalchemy import and_, func, case, or_
 import pandas as pd
 import calendar
 from utils.attendance_helpers import sum_eligible_overtime_shifts_sql
@@ -328,7 +328,7 @@ class SalaryService:
             # ============================================
 
             if site_id:
-                # When filtering by site, we need to join through WageMaster and Site
+                # When filtering by site, prefer joining through WageMaster.site_id; include employees with Employee.site_id
                 employees_query = db.session.query(
                     Employee.employee_id,
                     Employee.first_name,
@@ -339,9 +339,11 @@ class SalaryService:
                     WageMaster.base_wage.label('wage_master_base_wage')
                 ).join(
                     WageMaster, Employee.salary_code == WageMaster.salary_code
-                ).join(
-                    Site, WageMaster.site_name == Site.site_name
-                ).filter(Site.site_id == site_id).order_by(Employee.employee_id.asc())
+                ).outerjoin(
+                    Site, WageMaster.site_id == Site.site_id
+                ).filter(
+                    or_(WageMaster.site_id == site_id, Employee.site_id == site_id)
+                ).order_by(Employee.employee_id.asc())
             else:
                 # When getting all employees, use outer join to include employees without wage masters
                 employees_query = db.session.query(
@@ -1307,7 +1309,7 @@ class SalaryService:
                 ).join(
                     WageMaster, Employee.salary_code == WageMaster.salary_code
                 ).join(
-                    Site, WageMaster.site_name == Site.site_name
+                    Site, WageMaster.site_id == Site.site_id
                 ).filter(Site.site_id == site_id).order_by(Employee.employee_id.asc())
             else:
                 # When getting all employees, use outer join to include employees without wage masters
