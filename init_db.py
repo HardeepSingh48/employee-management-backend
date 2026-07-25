@@ -41,6 +41,7 @@ def upsert_admin_user(email: str, password: str) -> None:
             name="Admin User",
             role="admin",
             created_by="_init_db",
+            is_temp_password=False,
         )
         db.session.add(admin)
     
@@ -74,6 +75,7 @@ def upsert_demo_employee_user(email: str, password: str) -> None:
             role="employee",
             employee_id=employee.employee_id,  # Use the auto-generated ID
             created_by="_init_db",
+            is_temp_password=False,
         )
         db.session.add(user)
     else:

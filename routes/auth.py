@@ -141,13 +141,24 @@ def login():
         # Get employee details if available
         employee_data = None
         if user.employee_id and user.employee:
+            site_name = None
+            site_id = user.employee.site_id
+            if getattr(user.employee, "wage_master", None) and user.employee.wage_master:
+                site_name = user.employee.wage_master.site_name
+                site_id = user.employee.wage_master.site_id or site_id
+            elif getattr(user.employee, "site", None) and user.employee.site:
+                site_name = user.employee.site.site_name
+                site_id = user.employee.site.site_id or site_id
+
             employee_data = {
                 'employee_id': user.employee.employee_id,
                 'first_name': user.employee.first_name,
                 'last_name': user.employee.last_name,
                 'department_id': user.employee.department_id,
                 'designation': user.employee.designation,
-                'salary_code': user.employee.salary_code
+                'salary_code': user.employee.salary_code,
+                'site_id': site_id,
+                'site_name': site_name,
             }
         
         # Safe user data creation
@@ -171,7 +182,9 @@ def login():
                 'last_login': user.last_login.isoformat() if user.last_login else None,
                 'profile_image': user.profile_image,
                 'department': user.department,
-                'created_date': user.created_date.isoformat() if user.created_date else None
+                'created_date': user.created_date.isoformat() if user.created_date else None,
+                'device_id': user.device_id,
+                'is_temp_password': user.is_temp_password,
             }
             # Add site_id for supervisors
             if user.role == 'supervisor':
@@ -296,6 +309,55 @@ def register():
             "message": f"Registration error: {str(e)}"
         }), 500
 
+
+@auth_bp.route("/set-password", methods=["POST"])
+@token_required
+def set_password(current_user):
+    """Set a new password after validating the current password."""
+    try:
+        data = request.get_json() or {}
+        current_password = data.get("current_password")
+        new_password = data.get("new_password")
+
+        if not current_password or not new_password:
+            return jsonify({"success": False, "message": "Current password and new password are required"}), 400
+
+        if not current_user.check_password(current_password):
+            return jsonify({"success": False, "message": "Current password is incorrect"}), 400
+
+        current_user.set_password(new_password)
+        current_user.is_temp_password = False
+        current_user.login_attempts = 0
+        current_user.locked_until = None
+        current_user.updated_by = current_user.email
+        db.session.commit()
+
+        return jsonify({"success": True, "message": "Password updated successfully"}), 200
+    except Exception as exc:
+        db.session.rollback()
+        return jsonify({"success": False, "message": f"Error updating password: {exc}"}), 500
+
+
+@auth_bp.route("/device-register", methods=["POST"])
+@token_required
+def register_device(current_user):
+    """Persist the current device identifier for later fraud checks."""
+    try:
+        data = request.get_json() or {}
+        device_id = str(data.get("device_id", "")).strip()
+
+        if not device_id:
+            return jsonify({"success": False, "message": "device_id is required"}), 400
+
+        current_user.device_id = device_id
+        current_user.updated_by = current_user.email
+        db.session.commit()
+
+        return jsonify({"success": True, "message": "Device registered successfully"}), 200
+    except Exception as exc:
+        db.session.rollback()
+        return jsonify({"success": False, "message": f"Error registering device: {exc}"}), 500
+
 @auth_bp.route("/me", methods=["GET"])
 @token_required
 def get_current_user(current_user):
@@ -303,6 +365,15 @@ def get_current_user(current_user):
     try:
         employee_data = None
         if current_user.employee_id and current_user.employee:
+            site_name = None
+            site_id = current_user.employee.site_id
+            if getattr(current_user.employee, "wage_master", None) and current_user.employee.wage_master:
+                site_name = current_user.employee.wage_master.site_name
+                site_id = current_user.employee.wage_master.site_id or site_id
+            elif getattr(current_user.employee, "site", None) and current_user.employee.site:
+                site_name = current_user.employee.site.site_name
+                site_id = current_user.employee.site.site_id or site_id
+
             employee_data = {
                 'employee_id': current_user.employee.employee_id,
                 'first_name': current_user.employee.first_name,
@@ -311,7 +382,9 @@ def get_current_user(current_user):
                 'designation': current_user.employee.designation,
                 'salary_code': current_user.employee.salary_code,
                 'phone_number': current_user.employee.phone_number,
-                'email': current_user.employee.email
+                'email': current_user.employee.email,
+                'site_id': site_id,
+                'site_name': site_name,
             }
         
         return jsonify({

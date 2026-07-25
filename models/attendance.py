@@ -15,6 +15,14 @@ class Attendance(db.Model):
     attendance_status = db.Column(db.String(20),
                                 db.CheckConstraint("attendance_status IN ('Present', 'Absent', 'OFF')"),
                                 default='Present')
+    selfie_photo_url = db.Column(db.String(500), nullable=True)
+    check_in_latitude = db.Column(db.Float, nullable=True)
+    check_in_longitude = db.Column(db.Float, nullable=True)
+    gps_accuracy_metres = db.Column(db.Float, nullable=True)
+    is_within_geofence = db.Column(db.Boolean, nullable=True)
+    attendance_source = db.Column(db.String(20), nullable=True, default='admin')
+    fraud_flags = db.Column(db.JSON, nullable=True, default=list)
+    verification_status = db.Column(db.String(20), nullable=True, default='auto_approved')
 
     # Additional attendance fields
     overtime_shifts = db.Column(db.Float, nullable=False, default=0.0)  # Changed from overtime_hours
@@ -59,6 +67,14 @@ class Attendance(db.Model):
             'check_in_time': self.check_in_time.isoformat() if self.check_in_time else None,
             'check_out_time': self.check_out_time.isoformat() if self.check_out_time else None,
             'attendance_status': self.attendance_status,
+            'selfie_photo_url': self.selfie_photo_url,
+            'check_in_latitude': self.check_in_latitude,
+            'check_in_longitude': self.check_in_longitude,
+            'gps_accuracy_metres': self.gps_accuracy_metres,
+            'is_within_geofence': self.is_within_geofence,
+            'attendance_source': self.attendance_source,
+            'fraud_flags': self.fraud_flags or [],
+            'verification_status': self.verification_status,
             'overtime_shifts': self.effective_overtime_shifts,
             'overtime_hours': self.overtime_hours,
             'late_minutes': self.late_minutes,

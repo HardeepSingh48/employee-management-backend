@@ -269,3 +269,34 @@ def delete_site(current_user, site_id):
             "success": False,
             "message": str(e)
         }), 500
+
+
+@sites_bp.route('/<site_id>/boundary', methods=['PUT'])
+@token_required
+def update_site_boundary(current_user, site_id):
+    """Update a site's geofence boundary."""
+    if current_user.role not in ['admin', 'admin1', 'admin2', 'superadmin']:
+        return jsonify({"success": False, "message": "Unauthorized"}), 403
+
+    try:
+        site = Site.query.get(site_id)
+        if not site:
+            return jsonify({"success": False, "message": "Site not found"}), 404
+
+        data = request.get_json() or {}
+
+        if 'latitude' in data:
+            site.latitude = data['latitude']
+        if 'longitude' in data:
+            site.longitude = data['longitude']
+        if 'radius_metres' in data:
+            site.radius_metres = data['radius_metres']
+
+        site.updated_date = datetime.utcnow().date()
+        site.updated_by = current_user.email
+        db.session.commit()
+
+        return jsonify({"success": True, "message": "Site boundary updated successfully", "data": site.to_dict()}), 200
+    except Exception as exc:
+        db.session.rollback()
+        return jsonify({"success": False, "message": str(exc)}), 500

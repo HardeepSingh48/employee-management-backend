@@ -250,6 +250,7 @@ def seed_demo_data():
                 name="Admin User",
                 role="admin",
                 created_by="init_fresh_db",
+                is_temp_password=False,
             )
             db.session.add(admin)
 
@@ -281,6 +282,7 @@ def seed_demo_data():
                 role="employee",
                 employee_id=demo_emp_id,
                 created_by="init_fresh_db",
+                is_temp_password=False,
             )
             db.session.add(emp_user)
 

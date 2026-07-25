@@ -23,7 +23,8 @@ def create_superadmin(email, password):
         email=email,
         name="Super Admin",
         role="superadmin",
-        created_by="system"
+        created_by="system",
+        is_temp_password=False,
     )
     user.set_password(password)
     user.set_permissions(["all"])

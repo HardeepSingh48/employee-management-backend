@@ -12,7 +12,7 @@ from config import (
 )
 from models import db
 import os
-from config import UPLOADS_DIR
+from config import UPLOADS_DIR, ATTENDANCE_UPLOADS_DIR
 from models.user import User
 from models.employee import Employee
 from flask_migrate import Migrate
@@ -90,6 +90,7 @@ def create_app(register_blueprints: bool = True):
 
     # Ensure uploads dir exists
     os.makedirs(UPLOADS_DIR, exist_ok=True)
+    os.makedirs(ATTENDANCE_UPLOADS_DIR, exist_ok=True)
 
     db.init_app(app)
     migrate = Migrate(app, db)
@@ -104,7 +105,8 @@ def create_app(register_blueprints: bool = True):
                         email="admin@company.com",
                         name="Admin User",
                         role="admin",
-                        created_by="system"
+                        created_by="system",
+                        is_temp_password=False,
                     )
                     admin.set_password("admin123")
                     admin.set_permissions(["all"])
@@ -131,7 +133,8 @@ def create_app(register_blueprints: bool = True):
                         name="Demo Employee",
                         role="employee",
                         employee_id=demo_employee_id,
-                        created_by="system"
+                        created_by="system",
+                        is_temp_password=False,
                     )
                     employee_user.set_password("emp123")
                     employee_user.set_permissions(["view_profile", "mark_attendance", "view_attendance"])
@@ -159,6 +162,7 @@ def create_app(register_blueprints: bool = True):
         from routes.deductions import deductions_bp
         from routes.payroll import payroll_bp
         from routes.id_cards import id_cards_bp
+        from routes.media import media_bp
 
         app.register_blueprint(auth_bp, url_prefix="/api/auth")
         app.register_blueprint(employee_dashboard_bp, url_prefix="/api/employee")
@@ -172,6 +176,7 @@ def create_app(register_blueprints: bool = True):
         app.register_blueprint(deductions_bp, url_prefix="/api/deductions")
         app.register_blueprint(payroll_bp, url_prefix="/api/payroll")
         app.register_blueprint(id_cards_bp, url_prefix="/api/id-cards")
+        app.register_blueprint(media_bp, url_prefix="/api/media")
         app.register_blueprint(superadmin_bp, url_prefix="/api")
 
         # Synchronize employee ID sequence on app startup

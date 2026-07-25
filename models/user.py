@@ -27,6 +27,8 @@ class User(db.Model):
     email = db.Column(db.String(120), unique=True, nullable=True)
     username = db.Column(db.String(80), unique=True, nullable=True)
     password_hash = db.Column(db.String(255), nullable=False)
+    device_id = db.Column(db.String(200), nullable=True)
+    is_temp_password = db.Column(db.Boolean, default=True)
     
     # User details
     name = db.Column(db.String(150), nullable=False)
@@ -109,6 +111,8 @@ class User(db.Model):
             'role': self.role,
             'is_active': self.is_active,
             'is_verified': self.is_verified,
+            'device_id': self.device_id,
+            'is_temp_password': self.is_temp_password,
             'permissions': self.get_permissions(),
             'last_login': self.last_login.isoformat() if self.last_login else None,
             'profile_image': self.profile_image,

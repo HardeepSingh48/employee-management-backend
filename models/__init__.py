@@ -10,3 +10,4 @@ from models.wage_master import WageMaster
 from models.attendance import Attendance
 from models.user import User
 from models.deduction import Deduction
+from models.refresh_token import RefreshToken

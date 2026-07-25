@@ -7,6 +7,9 @@ class Site(db.Model):
     site_id = db.Column(db.String(50), primary_key=True)
     site_name = db.Column(db.String(200), nullable=False)
     location = db.Column(db.String(500))
+    latitude = db.Column(db.Float, nullable=True)
+    longitude = db.Column(db.Float, nullable=True)
+    radius_metres = db.Column(db.Integer, nullable=True, default=200)
     state = db.Column(db.String(100), nullable=False)
     is_active = db.Column(db.Boolean, default=True)
     created_date = db.Column(db.Date, default=datetime.utcnow().date)
@@ -19,6 +22,9 @@ class Site(db.Model):
             'site_id': self.site_id,
             'site_name': self.site_name,
             'location': self.location,
+            'latitude': self.latitude,
+            'longitude': self.longitude,
+            'radius_metres': self.radius_metres,
             'state': self.state,
             'is_active': self.is_active,
             'created_date': self.created_date.isoformat() if self.created_date else None,
@@ -87,4 +93,4 @@ class Site(db.Model):
 
         db.session.delete(site)
         return True
-
+

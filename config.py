@@ -27,6 +27,7 @@ SQLALCHEMY_TRACK_MODIFICATIONS = False
 # Application configuration
 SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-change-in-production")
 UPLOADS_DIR = os.getenv("UPLOADS_DIR", "uploads/employees")
+ATTENDANCE_UPLOADS_DIR = os.getenv("ATTENDANCE_UPLOADS_DIR", "uploads/attendance")
 MAX_CONTENT_LENGTH = 10 * 1024 * 1024  # 10 MB
 ALLOWED_EXTENSIONS = {"jpeg", "jpg", "png", "pdf", "doc", "docx", "xlsx", "xls"}
 
