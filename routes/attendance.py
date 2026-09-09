@@ -14,7 +14,13 @@ import calendar
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from utils.attendance_helpers import round_to_half, normalize_attendance_value, is_date, parse_date_from_column
+from utils.attendance_helpers import (
+    round_to_half,
+    normalize_attendance_value,
+    normalize_attendance_for_date,
+    is_date,
+    parse_date_from_column,
+)
 from utils.file_validators import validate_excel_file, validate_excel_structure, validate_employee_data, validate_attendance_data
 from utils.performance_utils import PerformanceMonitor, memory_efficient_gc, optimize_dataframe_memory
 from sqlalchemy import or_
@@ -194,6 +200,12 @@ def process_employee_batch(batch_data):
                                 # Sunday work should always add one overtime shift, even when
                                 # monthly overtime is assigned to this same date.
                                 day_overtime += 1
+
+                            attendance_value, day_overtime = normalize_attendance_for_date(
+                                attendance_value,
+                                attendance_date,
+                                day_overtime,
+                            )
 
                             if existing:
                                 # Mark for update
@@ -974,7 +986,7 @@ def bulk_upload_attendance(current_user):
                     if col.startswith(('Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday')):
                         if pd.notna(row[col]) and row[col] != '':
                             # Extract date from column name and create attendance record
-                            attendance_status = str(row[col]).strip()
+                            attendance_status = normalize_attendance_value(row[col]) or 'Absent'
                             
                             # You'll need to implement date parsing logic based on your Excel format
                             # For now, using today's date as example
@@ -1568,6 +1580,12 @@ def bulk_mark_attendance_excel(current_user):
                                     # Sunday work should always add one overtime shift, even when
                                     # monthly overtime is assigned to this same date.
                                     day_overtime += 1
+
+                                attendance_value, day_overtime = normalize_attendance_for_date(
+                                    attendance_value,
+                                    attendance_date,
+                                    day_overtime,
+                                )
 
                                 if existing:
                                     # Mark for update

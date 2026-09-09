@@ -68,14 +68,25 @@ def create_site(current_user):
         return jsonify({"success": False, "message": "Unauthorized"}), 403
     
     try:
-        data = request.get_json()
+        data = request.get_json(silent=True) or {}
+
+        site_name = Site.normalize_name(data.get('site_name'))
+        state = str(data.get('state') or '').strip()
         
         # Validate required fields
-        if not data.get('site_name') or not data.get('state'):
+        if not site_name or not state:
             return jsonify({
                 "success": False,
                 "message": "site_name and state are required"
             }), 400
+
+        existing_site = Site.find_by_name(site_name)
+        if existing_site:
+            return jsonify({
+                "success": False,
+                "message": f"A site with the name '{existing_site.site_name}' already exists.",
+                "existing_site": existing_site.to_dict(),
+            }), 409
         
         # Generate site_id
         site_id = generate_site_id()
@@ -83,9 +94,9 @@ def create_site(current_user):
         # Create site
         site = Site(
             site_id=site_id,
-            site_name=data['site_name'],
+            site_name=site_name,
             location=data.get('location'),
-            state=data['state'],
+            state=state,
             created_by=current_user.email,  # Set created_by to current user
             is_active=True
         )
@@ -149,16 +160,30 @@ def bulk_import_sites(current_user):
         # Process each row
         created_count = 0
         errors = []
+        seen_names = set()
         
         for index, row in df.iterrows():
             try:
+                site_name = Site.normalize_name(row.get('site_name'))
+                state = str(row.get('state') or '').strip()
+                site_key = site_name.casefold()
+                if not site_name or not state:
+                    errors.append(f"Row {index + 1}: site_name and state are required")
+                    continue
+                if site_key in seen_names:
+                    errors.append(f"Row {index + 1}: Duplicate site name '{site_name}' in the upload")
+                    continue
+                seen_names.add(site_key)
+
                 # Check if site already exists (by site_name and state)
-                existing_site = Site.query.filter_by(
-                    site_name=row['site_name'],
-                    state=row['state']
-                ).first()
+                existing_site = Site.find_by_name(site_name)
                 
                 if existing_site:
+                    if existing_site.state.strip().casefold() != state.casefold():
+                        errors.append(
+                            f"Row {index + 1}: Site name '{site_name}' already exists with state '{existing_site.state}'"
+                        )
+                        continue
                     # Update existing site
                     existing_site.location = row.get('location', existing_site.location)
                     existing_site.updated_date = datetime.utcnow().date()
@@ -167,9 +192,9 @@ def bulk_import_sites(current_user):
                     # Create new site
                     site = Site(
                         site_id=generate_site_id(),
-                        site_name=row['site_name'],
+                        site_name=site_name,
                         location=row.get('location'),
-                        state=row['state'],
+                        state=state,
                         created_by=current_user.email,
                         is_active=True
                     )
@@ -211,15 +236,35 @@ def update_site(current_user, site_id):
                 "message": "Site not found"
             }), 404
         
-        data = request.get_json()
+        data = request.get_json(silent=True) or {}
         
         # Update fields if provided
         if 'site_name' in data:
-            site.site_name = data['site_name']
+            site_name = Site.normalize_name(data.get('site_name'))
+            if not site_name:
+                return jsonify({
+                    "success": False,
+                    "message": "site_name cannot be empty"
+                }), 400
+
+            duplicate_site = Site.find_by_name(site_name, exclude_site_id=site.site_id)
+            if duplicate_site:
+                return jsonify({
+                    "success": False,
+                    "message": f"A site with the name '{duplicate_site.site_name}' already exists.",
+                    "existing_site": duplicate_site.to_dict(),
+                }), 409
+            site.site_name = site_name
         if 'location' in data:
             site.location = data['location']
         if 'state' in data:
-            site.state = data['state']
+            state = str(data.get('state') or '').strip()
+            if not state:
+                return jsonify({
+                    "success": False,
+                    "message": "state cannot be empty"
+                }), 400
+            site.state = state
         if 'is_active' in data:
             site.is_active = data['is_active']
             

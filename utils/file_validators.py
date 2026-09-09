@@ -175,7 +175,7 @@ def validate_attendance_data(df, date_columns, month, year):
         'month_mismatch': False
     }
 
-    valid_statuses = ['P', 'A', 'O', 'Present', 'Absent', 'OFF', '']
+    valid_statuses = ['P', 'A', 'O', 'R', 'Present', 'Absent', 'OFF', 'Reliever', 'Reliever Duty', '']
 
     # Validate date columns
     for col in date_columns:
@@ -219,7 +219,7 @@ def validate_attendance_data(df, date_columns, month, year):
                             'row': idx + 2,
                             'column': col,
                             'value': value,
-                            'error': f"Invalid attendance status '{value}'. Must be P, A, O, Present, Absent, or OFF"
+                            'error': f"Invalid attendance status '{value}'. Must be P, A, O, R, Present, Absent, OFF, or Reliever"
                         })
 
     return results

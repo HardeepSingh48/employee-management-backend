@@ -8,9 +8,28 @@ from datetime import datetime, date
 from sqlalchemy import and_, func, case, or_
 import pandas as pd
 import calendar
-from utils.attendance_helpers import sum_eligible_overtime_shifts_sql
+from utils.attendance_helpers import (
+    count_reliever_days_sql,
+    normalize_attendance_value,
+    sum_eligible_overtime_shifts_sql,
+)
 
 class SalaryService:
+
+    @staticmethod
+    def calculate_reliever_charges(daily_wage, reliever_days, year, month):
+        """Calculate the separate earning for reliever-duty attendance."""
+        if not daily_wage or not reliever_days:
+            return 0.0
+
+        days_in_month = calendar.monthrange(year, month)[1]
+        applicable_working_days = {
+            30: 26,
+            31: 27,
+        }.get(days_in_month, max(days_in_month - 4, 0))
+
+        rate_per_day = float(daily_wage) * applicable_working_days / 24
+        return round(rate_per_day * float(reliever_days), 2)
 
     # Wage rates by skill level (fallback mapping)
     wage_map = {
@@ -165,6 +184,7 @@ class SalaryService:
                 Attendance.employee_id,
                 func.count(case((Attendance.attendance_status == 'Present', 1))).label('present_days'),
                 func.count(case((Attendance.attendance_status == 'Absent', 1))).label('absent_days'),
+                count_reliever_days_sql(),
                 sum_eligible_overtime_shifts_sql()
             ).filter(
                 Attendance.employee_id.in_(employee_ids),
@@ -179,6 +199,7 @@ class SalaryService:
                 record.employee_id: {
                     'present_days': record.present_days or 0,
                     'absent_days': record.absent_days or 0,
+                    'reliever_days': record.reliever_days or 0,
                     'total_overtime_shifts': float(record.total_overtime_shifts or 0)
                 }
                 for record in attendance_summary
@@ -226,6 +247,12 @@ class SalaryService:
                 overtime_shifts = attendance['total_overtime_shifts']
                 overtime_hours = overtime_shifts * 8
                 overtime_allowance = round(overtime_hours * emp_info['overtime_rate_hourly'], 2)
+                reliever_charges = SalaryService.calculate_reliever_charges(
+                    daily_wage,
+                    attendance.get('reliever_days', 0),
+                    year,
+                    month,
+                )
 
                 # Get monthly deductions
                 monthly_deduction_total = 0
@@ -257,7 +284,7 @@ class SalaryService:
                 national_festival = SalaryService.calculate_national_festival_wages(basic)
 
                 # Calculate totals
-                total_earnings = basic + leave_wages + national_festival + special_basic + da + hra + overtime_manual + overtime_allowance + others_earnings
+                total_earnings = basic + leave_wages + national_festival + special_basic + da + hra + overtime_manual + overtime_allowance + reliever_charges + others_earnings
                 total_deductions = pf + esic + society + income_tax + insurance + others_recoveries + monthly_deduction_total
                 net_salary = total_earnings - total_deductions
 
@@ -276,6 +303,7 @@ class SalaryService:
                     'HRA': round(hra, 2),
                     'Overtime': round(overtime_manual, 2),
                     'Overtime Allowance': round(overtime_allowance, 2),
+                    'Reliever Charges': reliever_charges,
                     'Others': round(others_earnings, 2),
                     'Total Earnings': round(total_earnings, 2),
                     'PF': round(pf, 2),
@@ -396,6 +424,7 @@ class SalaryService:
                 Attendance.employee_id,
                 func.count(case((Attendance.attendance_status == 'Present', 1))).label('present_days'),
                 func.count(case((Attendance.attendance_status == 'Absent', 1))).label('absent_days'),
+                count_reliever_days_sql(),
                 sum_eligible_overtime_shifts_sql()
             ).filter(
                 Attendance.employee_id.in_(employee_ids),
@@ -410,6 +439,7 @@ class SalaryService:
                 record.employee_id: {
                     'present_days': record.present_days or 0,
                     'absent_days': record.absent_days or 0,
+                    'reliever_days': record.reliever_days or 0,
                     'total_overtime_shifts': float(record.total_overtime_shifts or 0)
                 }
                 for record in attendance_summary
@@ -457,6 +487,12 @@ class SalaryService:
                 overtime_shifts = attendance['total_overtime_shifts']
                 overtime_hours = overtime_shifts * 8
                 overtime_allowance = round(overtime_hours * emp_info['overtime_rate_hourly'], 2)
+                reliever_charges = SalaryService.calculate_reliever_charges(
+                    daily_wage,
+                    attendance.get('reliever_days', 0),
+                    year,
+                    month,
+                )
                 
                 # Get monthly deductions
                 monthly_deduction_total = 0
@@ -488,7 +524,7 @@ class SalaryService:
                 national_festival = SalaryService.calculate_national_festival_wages(basic)
 
                 # Calculate totals
-                total_earnings = basic + leave_wages + national_festival + special_basic + da + hra + overtime_manual + overtime_allowance + others_earnings
+                total_earnings = basic + leave_wages + national_festival + special_basic + da + hra + overtime_manual + overtime_allowance + reliever_charges + others_earnings
                 total_deductions = pf + esic + society + income_tax + insurance + others_recoveries + monthly_deduction_total
                 net_salary = total_earnings - total_deductions
                 
@@ -507,6 +543,7 @@ class SalaryService:
                     'HRA': round(hra, 2),
                     'Overtime': round(overtime_manual, 2),
                     'Overtime Allowance': round(overtime_allowance, 2),
+                    'Reliever Charges': round(reliever_charges, 2),
                     'Others': round(others_earnings, 2),
                     'Total Earnings': round(total_earnings, 2),
                     'PF': round(pf, 2),
@@ -553,15 +590,35 @@ class SalaryService:
 
             def calculate(row):
                 days_present = sum(str(row[col]).strip().upper() == 'P' for col in attendance_cols)
+                reliever_days = sum(
+                    normalize_attendance_value(row[col]) == 'Reliever'
+                    for col in attendance_cols
+                )
                 employee_id = str(row['Employee ID']).strip()
                 daily_wage = SalaryService.get_employee_daily_wage(employee_id)
+
+                current_date = datetime.now()
+                reliever_charges = SalaryService.calculate_reliever_charges(
+                    daily_wage,
+                    reliever_days,
+                    current_date.year,
+                    current_date.month,
+                )
 
                 basic = days_present * daily_wage
                 pf = 0.12 * min(basic, 15000)
                 esic = 0.0075 * min(basic, 21000)
-                return pd.Series([days_present, daily_wage, basic, pf, esic])
+                return pd.Series([
+                    days_present,
+                    reliever_days,
+                    daily_wage,
+                    basic,
+                    pf,
+                    esic,
+                    reliever_charges,
+                ])
 
-            df[['Present Days', 'Daily Wage', 'Basic', 'PF', 'ESIC']] = df.apply(calculate, axis=1)
+            df[['Present Days', 'Reliever Days', 'Daily Wage', 'Basic', 'PF', 'ESIC', 'Reliever Charges']] = df.apply(calculate, axis=1)
 
             if not adj.empty:
                 df = pd.merge(df, adj, on='Employee ID', how='left')
@@ -569,7 +626,7 @@ class SalaryService:
             df['Leave Wages'] = df['Basic'].apply(SalaryService.calculate_leave_wages)
             df['National & Festival'] = df['Basic'].apply(SalaryService.calculate_national_festival_wages)
 
-            earnings_cols = ['Leave Wages', 'National & Festival', 'Special Basic', 'DA', 'HRA', 'Overtime', 'Overtime Allowance', 'Others']
+            earnings_cols = ['Leave Wages', 'National & Festival', 'Special Basic', 'DA', 'HRA', 'Overtime', 'Overtime Allowance', 'Reliever Charges', 'Others']
             deduction_cols = ['Society', 'Income Tax', 'Insurance', 'Others Recoveries']
             for col in earnings_cols + deduction_cols:
                 if col not in df.columns:
@@ -628,10 +685,10 @@ class SalaryService:
             
             df['Net Salary'] = df['Total Earnings'] - df['Total Deductions']
 
-            deduction_type_cols = [col for col in df.columns if col not in ['Employee ID', 'Employee Name', 'Skill Level', 'Present Days', 'Daily Wage', 'Basic'] + 
+            deduction_type_cols = [col for col in df.columns if col not in ['Employee ID', 'Employee Name', 'Skill Level', 'Present Days', 'Reliever Days', 'Daily Wage', 'Basic'] +
                                  earnings_cols + ['Total Earnings', 'PF', 'ESIC'] + deduction_cols + ['Total Deductions', 'Net Salary']]
             
-            final_cols = ['Employee ID', 'Employee Name', 'Skill Level', 'Present Days', 'Daily Wage', 'Basic'] + \
+            final_cols = ['Employee ID', 'Employee Name', 'Skill Level', 'Present Days', 'Reliever Days', 'Daily Wage', 'Basic'] + \
                          earnings_cols + ['Total Earnings', 'PF', 'ESIC'] + deduction_cols + deduction_type_cols + \
                          ['Total Deductions', 'Net Salary']
             output = df[final_cols].fillna(0).to_dict(orient='records')
@@ -688,6 +745,12 @@ class SalaryService:
             overtime_allowance, total_overtime_shifts, total_overtime_hours, overtime_rate_hourly = SalaryService.calculate_overtime_allowance(
                 employee_id, year, month
             )
+            reliever_charges = SalaryService.calculate_reliever_charges(
+                daily_wage,
+                summary_data.get('reliever_days', 0),
+                year,
+                month,
+            )
 
             special_basic = adjustments.get('Special Basic', 0) if adjustments else 0
             da = adjustments.get('DA', 0) if adjustments else 0
@@ -703,7 +766,7 @@ class SalaryService:
             leave_wages = SalaryService.calculate_leave_wages(basic)
             national_festival = SalaryService.calculate_national_festival_wages(basic)
 
-            total_earnings = basic + leave_wages + national_festival + special_basic + da + hra + overtime + overtime_allowance + others_earnings
+            total_earnings = basic + leave_wages + national_festival + special_basic + da + hra + overtime + overtime_allowance + reliever_charges + others_earnings
             total_deductions = pf + esic + society + income_tax + insurance + others_recoveries
             
             monthly_deduction_total, deduction_details = SalaryService.get_monthly_deductions(employee_id, year, month)
@@ -728,6 +791,7 @@ class SalaryService:
                 'Overtime Shifts': total_overtime_shifts,
                 'Overtime Hours': total_overtime_hours,
                 'Overtime Rate Hourly': overtime_rate_hourly,
+                'Reliever Charges': reliever_charges,
                 'Others': others_earnings,
                 'Total Earnings': total_earnings,
                 'PF': pf,
@@ -876,6 +940,7 @@ class SalaryService:
                 Attendance.employee_id,
                 func.count(case((Attendance.attendance_status == 'Present', 1))).label('present_days'),
                 func.count(case((Attendance.attendance_status == 'Absent', 1))).label('absent_days'),
+                count_reliever_days_sql(),
                 sum_eligible_overtime_shifts_sql()
             ).filter(
                 Attendance.employee_id.in_(employee_ids),
@@ -890,6 +955,7 @@ class SalaryService:
                 record.employee_id: {
                     'present_days': record.present_days or 0,
                     'absent_days': record.absent_days or 0,
+                    'reliever_days': record.reliever_days or 0,
                     'total_overtime_shifts': float(record.total_overtime_shifts or 0)
                 }
                 for record in attendance_summary
@@ -931,6 +997,12 @@ class SalaryService:
                 overtime_shifts = attendance['total_overtime_shifts']
                 overtime_hours = overtime_shifts * 8
                 overtime_allowance = round(overtime_hours * emp_info['overtime_rate_hourly'], 2)
+                reliever_charges = SalaryService.calculate_reliever_charges(
+                    daily_wage,
+                    attendance.get('reliever_days', 0),
+                    year,
+                    month,
+                )
 
                 # Monthly deductions
                 monthly_deduction_total = 0
@@ -962,7 +1034,7 @@ class SalaryService:
                 national_festival = SalaryService.calculate_national_festival_wages(basic)
 
                 # Calculate totals (matching individual calculation)
-                total_earnings = basic + leave_wages + national_festival + special_basic + da + hra + overtime_manual + overtime_allowance + others_earnings
+                total_earnings = basic + leave_wages + national_festival + special_basic + da + hra + overtime_manual + overtime_allowance + reliever_charges + others_earnings
                 total_deductions = pf + esic + society + income_tax + insurance + others_recoveries + monthly_deduction_total
                 net_salary = total_earnings - total_deductions
 
@@ -981,6 +1053,7 @@ class SalaryService:
                     'HRA': round(hra, 2),
                     'Overtime': round(overtime_manual, 2),
                     'Overtime Allowance': round(overtime_allowance, 2),
+                    'Reliever Charges': round(reliever_charges, 2),
                     'Overtime Shifts': overtime_shifts,
                     'Overtime Hours': overtime_hours,
                     'Overtime Rate Hourly': round(emp_info['overtime_rate_hourly'], 2),
@@ -1065,6 +1138,7 @@ class SalaryService:
                 Attendance.employee_id,
                 func.count(case((Attendance.attendance_status == 'Present', 1))).label('present_days'),
                 func.count(case((Attendance.attendance_status == 'Absent', 1))).label('absent_days'),
+                count_reliever_days_sql(),
                 sum_eligible_overtime_shifts_sql()
             ).filter(
                 Attendance.employee_id.in_(employee_ids),
@@ -1079,6 +1153,7 @@ class SalaryService:
                 record.employee_id: {
                     'present_days': record.present_days or 0,
                     'absent_days': record.absent_days or 0,
+                    'reliever_days': record.reliever_days or 0,
                     'total_overtime_shifts': float(record.total_overtime_shifts or 0)
                 }
                 for record in attendance_summary
@@ -1120,6 +1195,12 @@ class SalaryService:
                 overtime_shifts = attendance['total_overtime_shifts']
                 overtime_hours = overtime_shifts * 8
                 overtime_allowance = round(overtime_hours * emp_info['overtime_rate_hourly'], 2)
+                reliever_charges = SalaryService.calculate_reliever_charges(
+                    daily_wage,
+                    attendance.get('reliever_days', 0),
+                    year,
+                    month,
+                )
 
                 # Initialize other components (set to 0 for bulk generation)
                 special_basic = 0
@@ -1151,7 +1232,7 @@ class SalaryService:
                 national_festival = SalaryService.calculate_national_festival_wages(basic)
 
                 # Calculate totals
-                total_earnings = basic + leave_wages + national_festival + special_basic + da + hra + overtime_manual + overtime_allowance + others_earnings
+                total_earnings = basic + leave_wages + national_festival + special_basic + da + hra + overtime_manual + overtime_allowance + reliever_charges + others_earnings
                 total_deductions = pf + esic + society + income_tax + insurance + others_recoveries + monthly_deduction_total
                 net_salary = total_earnings - total_deductions
 
@@ -1170,6 +1251,7 @@ class SalaryService:
                     'HRA': round(hra, 2),
                     'Overtime': round(overtime_manual, 2),
                     'Overtime Allowance': round(overtime_allowance, 2),
+                    'Reliever Charges': round(reliever_charges, 2),
                     'Others': round(others_earnings, 2),
                     'Total Earnings': round(total_earnings, 2),
                     'PF': round(pf, 2),
@@ -1372,6 +1454,7 @@ class SalaryService:
                 Attendance.employee_id,
                 func.count(case((Attendance.attendance_status == 'Present', 1))).label('present_days'),
                 func.count(case((Attendance.attendance_status == 'Absent', 1))).label('absent_days'),
+                count_reliever_days_sql(),
                 sum_eligible_overtime_shifts_sql()
             ).filter(
                 Attendance.employee_id.in_(employee_ids),
@@ -1386,6 +1469,7 @@ class SalaryService:
                 record.employee_id: {
                     'present_days': record.present_days or 0,
                     'absent_days': record.absent_days or 0,
+                    'reliever_days': record.reliever_days or 0,
                     'total_overtime_shifts': float(record.total_overtime_shifts or 0)
                 }
                 for record in attendance_summary
@@ -1433,6 +1517,12 @@ class SalaryService:
                 overtime_shifts = attendance['total_overtime_shifts']
                 overtime_hours = overtime_shifts * 8
                 overtime_allowance = round(overtime_hours * emp_info['overtime_rate_hourly'], 2)
+                reliever_charges = SalaryService.calculate_reliever_charges(
+                    regular_daily_wage,
+                    attendance.get('reliever_days', 0),
+                    year,
+                    month,
+                )
 
                 # Get monthly deductions
                 monthly_deduction_total = 0
@@ -1453,14 +1543,14 @@ class SalaryService:
                 national_festival = SalaryService.calculate_national_festival_wages(basic_regular)
 
                 # Calculate REGULAR net salary
-                total_earnings_regular = basic_regular + leave_wages + national_festival + overtime_allowance
+                total_earnings_regular = basic_regular + leave_wages + national_festival + overtime_allowance + reliever_charges
                 total_deductions_regular = pf + esic + monthly_deduction_total
                 net_salary_regular = total_earnings_regular - total_deductions_regular
 
                 # Calculate SSPL components
                 sspl_daily_wage = emp_info['sspl_daily_wage']
                 basic_sspl = present_days * sspl_daily_wage
-                sspl_base_amount = basic_sspl + overtime_allowance
+                sspl_base_amount = basic_sspl + overtime_allowance + reliever_charges
 
                 # Calculate Other Deduction = Net Regular - SSPL Base Amount
                 other_deduction = net_salary_regular - sspl_base_amount
@@ -1480,6 +1570,7 @@ class SalaryService:
                     'Leave Wages': round(leave_wages, 2),
                     'National & Festival': round(national_festival, 2),
                     'Overtime Allowance': round(overtime_allowance, 2),
+                    'Reliever Charges': reliever_charges,
                     'Total Earnings': round(total_earnings_regular, 2),  # Regular total earnings
                     'PF': round(pf, 2),
                     'ESIC': round(esic, 2),
@@ -1573,6 +1664,7 @@ class SalaryService:
                 Attendance.employee_id,
                 func.count(case((Attendance.attendance_status == 'Present', 1))).label('present_days'),
                 func.count(case((Attendance.attendance_status == 'Absent', 1))).label('absent_days'),
+                count_reliever_days_sql(),
                 sum_eligible_overtime_shifts_sql()
             ).filter(
                 Attendance.employee_id.in_(employee_ids),
@@ -1584,6 +1676,7 @@ class SalaryService:
                 rec.employee_id: {
                     'present_days': rec.present_days or 0,
                     'absent_days': rec.absent_days or 0,
+                    'reliever_days': rec.reliever_days or 0,
                     'total_overtime_shifts': float(rec.total_overtime_shifts or 0),
                 }
                 for rec in attendance_summary
@@ -1613,6 +1706,12 @@ class SalaryService:
                 # Regular display values
                 basic_regular = present_days * emp['regular_daily_wage']
                 overtime_allowance = round(overtime_hours * emp['overtime_rate_hourly'], 2)
+                reliever_charges = SalaryService.calculate_reliever_charges(
+                    emp['regular_daily_wage'],
+                    att.get('reliever_days', 0),
+                    year,
+                    month,
+                )
 
                 # Statutory deductions on regular basic
                 pf = round(0.12 * min(basic_regular, 15000), 2)
@@ -1626,13 +1725,13 @@ class SalaryService:
 
                 leave_wages = SalaryService.calculate_leave_wages(basic_regular)
                 national_festival = SalaryService.calculate_national_festival_wages(basic_regular)
-                total_earnings_regular = basic_regular + leave_wages + national_festival + overtime_allowance
+                total_earnings_regular = basic_regular + leave_wages + national_festival + overtime_allowance + reliever_charges
                 total_deductions_regular = pf + esic + monthly_deduction_total
                 net_salary_regular = total_earnings_regular - total_deductions_regular
 
                 # SSPL base
                 basic_sspl = present_days * emp['sspl_daily_wage']
-                sspl_base_amount = basic_sspl + overtime_allowance
+                sspl_base_amount = basic_sspl + overtime_allowance + reliever_charges
 
                 other_deduction = net_salary_regular - sspl_base_amount
                 total_deductions_final = pf + esic + other_deduction + monthly_deduction_total
@@ -1647,6 +1746,7 @@ class SalaryService:
                     'Basic Salary': round(basic_regular, 2),
                     'Leave Wages': round(leave_wages, 2),
                     'National & Festival': round(national_festival, 2),
+                    'Reliever Charges': reliever_charges,
                     'Total Earnings': round(total_earnings_regular, 2),
                     'PF': round(pf, 2),
                     'ESIC': round(esic, 2),
@@ -1722,6 +1822,7 @@ class SalaryService:
             attendance_summary = db.session.query(
                 Attendance.employee_id,
                 func.count(case((Attendance.attendance_status == 'Present', 1))).label('present_days'),
+                count_reliever_days_sql(),
                 sum_eligible_overtime_shifts_sql()
             ).filter(
                 Attendance.employee_id.in_(employee_ids),
@@ -1732,6 +1833,7 @@ class SalaryService:
             attendance_dict = {
                 r.employee_id: {
                     'present_days': r.present_days or 0,
+                    'reliever_days': r.reliever_days or 0,
                     'total_overtime_shifts': float(r.total_overtime_shifts or 0),
                 }
                 for r in attendance_summary
@@ -1757,6 +1859,12 @@ class SalaryService:
                 pf = round(0.12 * min(basic_regular, 15000), 2)
                 esic = round(0.0075 * min(basic_regular, 21000), 2)
                 overtime_allowance = round(overtime_hours * info['overtime_rate_hourly'], 2)
+                reliever_charges = SalaryService.calculate_reliever_charges(
+                    info['regular_daily_wage'],
+                    att.get('reliever_days', 0),
+                    year,
+                    month,
+                )
 
                 monthly_deduction_total = 0
                 if emp_id in deductions_by_employee:
@@ -1765,12 +1873,12 @@ class SalaryService:
 
                 leave_wages = SalaryService.calculate_leave_wages(basic_regular)
                 national_festival = SalaryService.calculate_national_festival_wages(basic_regular)
-                total_earnings_regular = basic_regular + leave_wages + national_festival + overtime_allowance
+                total_earnings_regular = basic_regular + leave_wages + national_festival + overtime_allowance + reliever_charges
                 total_deductions_regular = pf + esic + monthly_deduction_total
                 net_salary_regular = total_earnings_regular - total_deductions_regular
 
                 basic_sspl = present_days * info['sspl_daily_wage']
-                sspl_base_amount = basic_sspl + overtime_allowance
+                sspl_base_amount = basic_sspl + overtime_allowance + reliever_charges
                 other_deduction = net_salary_regular - sspl_base_amount
 
                 total_deductions_final = pf + esic + other_deduction + monthly_deduction_total
@@ -1786,6 +1894,7 @@ class SalaryService:
                     'Leave Wages': round(leave_wages, 2),
                     'National & Festival': round(national_festival, 2),
                     'Overtime Allowance': round(overtime_allowance, 2),
+                    'Reliever Charges': reliever_charges,
                     'Total Earnings': round(total_earnings_regular, 2),
                     'PF': round(pf, 2),
                     'ESIC': round(esic, 2),
