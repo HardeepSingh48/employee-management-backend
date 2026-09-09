@@ -13,7 +13,7 @@ class Attendance(db.Model):
     check_in_time = db.Column(db.DateTime)
     check_out_time = db.Column(db.DateTime)
     attendance_status = db.Column(db.String(20),
-                                db.CheckConstraint("attendance_status IN ('Present', 'Absent', 'OFF')"),
+                                db.CheckConstraint("attendance_status IN ('Present', 'Absent', 'OFF', 'Reliever')"),
                                 default='Present')
 
     # Additional attendance fields

@@ -163,6 +163,9 @@ def generate_payslip_html(employee_data, year, month):
     if float(salary_data.get('Overtime', 0)) > 0:
         earnings.append(('Overtime', salary_data.get('Overtime', 0)))
 
+    if float(salary_data.get('Reliever Charges', 0)) > 0:
+        earnings.append(('Reliever', salary_data.get('Reliever Charges', 0)))
+
     # Always show Overtime Allowance if present days > 0 (it's calculated)
     if float(salary_data.get('Overtime Allowance', 0)) > 0 or int(salary_data.get('Present Days', 0)) > 0:
         earnings.append(('OT Allow', salary_data.get('Overtime Allowance', 0)))
@@ -195,7 +198,7 @@ def generate_payslip_html(employee_data, year, month):
     overtime_fields_to_exclude = ['Overtime Shifts', 'Overtime Hours', 'Overtime Rate Hourly']
     for key, value in salary_data.items():
         if key not in ['Employee ID', 'Employee Name', 'Skill Level', 'Present Days', 'Daily Wage',
-                       'Basic', 'Leave Wages', 'National & Festival', 'Special Basic', 'DA', 'HRA', 'Overtime', 'Overtime Allowance', 'Others', 'Total Earnings',
+                       'Basic', 'Leave Wages', 'National & Festival', 'Special Basic', 'DA', 'HRA', 'Overtime', 'Overtime Allowance', 'Reliever Days', 'Reliever Charges', 'Others', 'Total Earnings',
                        'PF', 'ESIC', 'Society', 'Income Tax', 'Insurance', 'Others Recoveries',
                        'Total Deductions', 'Net Salary'] + overtime_fields_to_exclude and float(value) > 0:
             # Truncate long names for better fit
@@ -306,7 +309,7 @@ def generate_payslip_html(employee_data, year, month):
     
     return html
 
-def generate_payslip_html_from_data(salary_data):
+def generate_payslip_html_from_data(salary_data, year, month):
     """Generate optimized HTML for a single payslip using pre-calculated salary data"""
 
     try:
@@ -317,12 +320,6 @@ def generate_payslip_html_from_data(salary_data):
         # Truncate employee name if too long
         if len(employee_name) > 25:
             employee_name = employee_name[:22] + "..."
-
-        # Get month name (assume current month for preview)
-        from datetime import datetime
-        current_date = datetime.now()
-        month = current_date.month
-        year = current_date.year
 
         month_names = ['', 'JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN',
                       'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']
@@ -360,6 +357,9 @@ def generate_payslip_html_from_data(salary_data):
         if float(salary_data.get('Overtime', 0)) > 0:
             earnings.append(('Overtime', salary_data.get('Overtime', 0)))
 
+        if float(salary_data.get('Reliever Charges', 0)) > 0:
+            earnings.append(('Reliever', salary_data.get('Reliever Charges', 0)))
+
         # Always show Overtime Allowance if present days > 0 (it's calculated)
         if float(salary_data.get('Overtime Allowance', 0)) > 0 or int(salary_data.get('Present Days', 0)) > 0:
             earnings.append(('OT Allow', salary_data.get('Overtime Allowance', 0)))
@@ -396,7 +396,7 @@ def generate_payslip_html_from_data(salary_data):
         overtime_fields_to_exclude = ['Overtime Shifts', 'Overtime Hours', 'Overtime Rate Hourly']
         for key, value in salary_data.items():
             if key not in ['Employee ID', 'Employee Name', 'Skill Level', 'Present Days', 'Daily Wage',
-                          'Basic', 'Leave Wages', 'National & Festival', 'Special Basic', 'DA', 'HRA', 'Overtime', 'Overtime Allowance', 'Others', 'Total Earnings',
+                          'Basic', 'Leave Wages', 'National & Festival', 'Special Basic', 'DA', 'HRA', 'Overtime', 'Overtime Allowance', 'Reliever Days', 'Reliever Charges', 'Others', 'Total Earnings',
                           'PF', 'ESIC', 'Society', 'Income Tax', 'Insurance', 'Others Recoveries', 'Other Deduction',
                           'Total Deductions', 'Net Salary'] + overtime_fields_to_exclude and float(value) > 0:
                 # Truncate long names for better fit
@@ -821,7 +821,7 @@ def preview_payroll(current_user):
             try:
                 if emp_id in salary_data_dict:
                     salary_data = salary_data_dict[emp_id]
-                    payslip_html = generate_payslip_html_from_data(salary_data)
+                    payslip_html = generate_payslip_html_from_data(salary_data, year, month)
                     html_content += payslip_html
                 else:
                     html_content += f"<div>Error: No salary data found for employee {emp_id}</div>"
@@ -928,7 +928,7 @@ def generate_payroll(current_user):
             try:
                 if emp_id in salary_data_dict:
                     salary_data = salary_data_dict[emp_id]
-                    payslip_html = generate_payslip_html_from_data(salary_data)
+                    payslip_html = generate_payslip_html_from_data(salary_data, year, month)
                     html_content += payslip_html
                     successful_payslips += 1
                 else:
@@ -1031,7 +1031,7 @@ def preview_payroll_sspl(current_user):
         for emp_id in preview_employee_ids:
             try:
                 if emp_id in salary_data_dict:
-                    payslip_html = generate_payslip_html_from_data(salary_data_dict[emp_id])
+                    payslip_html = generate_payslip_html_from_data(salary_data_dict[emp_id], year, month)
                     html_content += payslip_html
                 else:
                     html_content += f"<div>Error: No SSPL salary data found for employee {emp_id}</div>"
@@ -1110,7 +1110,7 @@ def generate_payroll_sspl(current_user):
         for emp_id in employee_ids:
             try:
                 if emp_id in salary_data_dict:
-                    payslip_html = generate_payslip_html_from_data(salary_data_dict[emp_id])
+                    payslip_html = generate_payslip_html_from_data(salary_data_dict[emp_id], year, month)
                     html_content += payslip_html
                     successful_payslips += 1
                 else:

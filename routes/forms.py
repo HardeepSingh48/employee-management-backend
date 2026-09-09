@@ -168,12 +168,13 @@ def get_form_b_data():
                 "totalDays": present_days + (overtime_hours / 8),  # Convert OT hours to days
                 "grossEarnings": {
                     "bs": salary_data.get('Basic', 0),
+                    "ota": overtime_amount,
+                    "relieving": salary_data.get('Reliever Charges', 0) or 0,
                     "leaveWages": salary_data.get('Leave Wages', 0),
                     "nationalFestival": salary_data.get('National & Festival', 0),
                     "da": salary_data.get('DA', 0),
                     "hra": salary_data.get('HRA', 0),
                     "cov": 0,  # Conveyance allowance
-                    "ota": overtime_amount,
                     "ae": salary_data.get('Others', 0)  # Additional earnings
                 },
                 "totalEarnings": salary_data.get('Total Earnings', 0),
@@ -197,6 +198,7 @@ def get_form_b_data():
             "totalEmployees": len(form_b_data),
             "totalDaysWorked": sum(row["daysWorked"] for row in form_b_data),
             "totalOvertime": sum(row["overtime"] for row in form_b_data),
+            "totalRelieving": sum(row["grossEarnings"]["relieving"] or 0 for row in form_b_data),
             "totalEarnings": sum(row["totalEarnings"] for row in form_b_data),
             "totalDeductions": sum(row["deductions"]["total"] for row in form_b_data),
             "totalOtherRecoveries": sum(row["deductions"]["otherRecoveries"] or 0 for row in form_b_data),
@@ -282,6 +284,7 @@ def get_form_b_special_wages():
                 "totalEmployees": 0,
                 "totalDaysWorked": 0,
                 "totalOvertime": 0,
+                "totalRelieving": 0,
                 "totalEarnings": 0,
                 "totalDeductions": 0,
                 "totalOtherDeduction": 0,
@@ -307,6 +310,7 @@ def get_form_b_special_wages():
         form_b_data = []
         total_days_worked = 0
         total_overtime = 0
+        total_relieving = 0
         total_earnings = 0
         total_deductions = 0
         total_other_recoveries = 0
@@ -344,12 +348,13 @@ def get_form_b_special_wages():
                 "totalDays": total_days,
                 "grossEarnings": {
                     "bs": s.get('Basic', 0),
+                    "ota": overtime_allowance,
+                    "relieving": s.get('Reliever Charges', 0) or 0,
                     "leaveWages": s.get('Leave Wages', 0) or 0,
                     "nationalFestival": s.get('National & Festival', 0) or 0,
                     "da": s.get('DA', 0) or 0,
                     "hra": s.get('HRA', 0) or 0,
                     "cov": 0,
-                    "ota": overtime_allowance,
                     "ae": s.get('Others', 0) or 0
                 },
                 "totalEarnings": s.get('Total Earnings', 0),
@@ -371,6 +376,7 @@ def get_form_b_special_wages():
 
             total_days_worked += form_b_row["daysWorked"]
             total_overtime += form_b_row["overtime"]
+            total_relieving = total_relieving + (form_b_row["grossEarnings"]["relieving"] or 0)
             total_earnings += form_b_row["totalEarnings"]
             total_deductions += form_b_row["deductions"]["total"]
             total_other_recoveries += form_b_row["deductions"]["otherRecoveries"] or 0
@@ -381,6 +387,7 @@ def get_form_b_special_wages():
             "totalEmployees": len(form_b_data),
             "totalDaysWorked": total_days_worked,
             "totalOvertime": total_overtime,
+            "totalRelieving": total_relieving,
             "totalEarnings": total_earnings,
             "totalDeductions": total_deductions,
             "totalOtherDeduction": total_other_deduction,
@@ -457,12 +464,13 @@ def download_form_b_excel():
                     'Overtime': row['overtime'],
                     'Total Days': row['totalDays'],
                     'BS': row['grossEarnings']['bs'],
+                    'OTA': row['grossEarnings']['ota'],
+                    'Relieving': row['grossEarnings'].get('relieving', 0),
                     'Leave Wages': row['grossEarnings'].get('leaveWages', 0),
                     'National & Festival': row['grossEarnings'].get('nationalFestival', 0),
                     'DA': row['grossEarnings']['da'],
                     'HRA': row['grossEarnings']['hra'],
                     'COV': row['grossEarnings']['cov'],
-                    'OTA': row['grossEarnings']['ota'],
                     'AE': row['grossEarnings']['ae'],
                     'Total Earnings': row['totalEarnings'],
                     'PF': row['deductions']['pf'],
@@ -488,12 +496,13 @@ def download_form_b_excel():
                 'Overtime': totals['totalOvertime'],
                 'Total Days': '',
                 'BS': '',
+                'OTA': '',
+                'Relieving': totals.get('totalRelieving', 0),
                 'Leave Wages': '',
                 'National & Festival': '',
                 'DA': '',
                 'HRA': '',
                 'COV': '',
-                'OTA': '',
                 'AE': '',
                 'Total Earnings': totals['totalEarnings'],
                 'PF': '',
@@ -533,11 +542,11 @@ def download_form_b_excel():
                 cell.alignment = Alignment(horizontal='center')
 
             # Merge cells for headers to span across columns
-            worksheet.merge_cells('A1:Z1')  # Form B
-            worksheet.merge_cells('A2:Z2')  # Format For Wage Register
-            worksheet.merge_cells('A3:Z3')  # Rate of minimum wages with date
-            worksheet.merge_cells('A4:Z4')  # SSPL
-            worksheet.merge_cells('A5:Z5')  # Month and Site info
+            worksheet.merge_cells('A1:AA1')  # Form B
+            worksheet.merge_cells('A2:AA2')  # Format For Wage Register
+            worksheet.merge_cells('A3:AA3')  # Rate of minimum wages with date
+            worksheet.merge_cells('A4:AA4')  # SSPL
+            worksheet.merge_cells('A5:AA5')  # Month and Site info
         
         output.seek(0)
         
@@ -980,8 +989,8 @@ def get_form_c_data():
             eps_contribution = round(eps_wages * 0.0833, 0)  # 8.33% EPS contribution
             epf_eps_diff = epf_contribution - eps_contribution
 
-            # NCP Days (Non-Contributing Period) - for now, assume 0
-            ncp_days = 0
+            # NCP days are the number of attendance records marked Absent.
+            ncp_days = attendance_data.get('absent_days', 0)
 
             # Refund of Advance - for now, assume 0
             refund_of_advance = 0
@@ -989,6 +998,7 @@ def get_form_c_data():
             form_c_row = {
                 "slNo": idx,
                 "memberName": f"{employee.first_name} {employee.last_name}",
+                "uanNumber": employee.uan or "",
                 "grossWages": gross_wages,
                 "epfWages": epf_wages,
                 "epsWages": eps_wages,
@@ -1097,6 +1107,7 @@ def download_form_c_excel():
                 excel_row = {
                     'Sl.No': row['slNo'],
                     'Member Name': row['memberName'],
+                    'UAN Number': row['uanNumber'],
                     'Gross Wages': row['grossWages'],
                     'EPF Wages': row['epfWages'],
                     'EPS Wages': row['epsWages'],
@@ -1113,6 +1124,7 @@ def download_form_c_excel():
             totals_row = {
                 'Sl.No': '',
                 'Member Name': 'TOTAL',
+                'UAN Number': '',
                 'Gross Wages': totals['totalGrossWages'],
                 'EPF Wages': totals['totalEpfWages'],
                 'EPS Wages': totals['totalEpsWages'],
@@ -1150,11 +1162,11 @@ def download_form_c_excel():
                 cell.alignment = Alignment(horizontal='center')
 
             # Merge cells for headers
-            worksheet.merge_cells('A1:K1')
-            worksheet.merge_cells('A2:K2')
-            worksheet.merge_cells('A3:K3')
-            worksheet.merge_cells('A4:K4')
-            worksheet.merge_cells('A5:K5')
+            worksheet.merge_cells('A1:L1')
+            worksheet.merge_cells('A2:L2')
+            worksheet.merge_cells('A3:L3')
+            worksheet.merge_cells('A4:L4')
+            worksheet.merge_cells('A5:L5')
 
         output.seek(0)
 

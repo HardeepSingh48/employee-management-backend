@@ -4,7 +4,6 @@ import re
 import math
 from datetime import datetime
 import os
-from models.employee import Employee
 
 
 """
@@ -163,13 +162,21 @@ STATUS_MAP = {
     'P': 'Present',
     'A': 'Absent',
     'O': 'OFF',
+    'R': 'Reliever',
     'Present': 'Present',
     'Absent': 'Absent',
-    'OFF': 'OFF'
+    'OFF': 'OFF',
+    'Reliever': 'Reliever',
+    'Reliever Duty': 'Reliever'
 }
 
-# Overtime counts toward payroll only on worked / OT days (not plain absent days).
-OVERTIME_ELIGIBLE_STATUSES = ('Present', 'OFF')
+# Keep the canonical value as ``Reliever`` while accepting legacy values when
+# reading historical records that may have been written before normalization.
+RELIEVER_STATUSES = ('Reliever', 'R', 'Reliever Duty')
+
+# The attendance rules use P for a regular working day and S/OFF for Sunday
+# work.  Only S/OFF contributes to overtime; P contributes to basic wages.
+OVERTIME_ELIGIBLE_STATUSES = ('OFF',)
 
 
 def is_overtime_eligible(attendance_status):
@@ -178,14 +185,33 @@ def is_overtime_eligible(attendance_status):
 
 
 def normalize_overtime_shifts_for_status(attendance_status, overtime_shifts):
-    """Enforce domain rule: Absent days always have zero overtime."""
+    """Keep overtime only for statuses that are eligible for overtime pay."""
     if not is_overtime_eligible(attendance_status):
         return 0.0
     return float(overtime_shifts or 0.0)
 
 
+def normalize_attendance_for_date(attendance_status, attendance_date, overtime_shifts=0.0):
+    """Apply the P/R/S attendance rules before a record is persisted.
+
+    Sunday work is represented by the existing ``OFF`` status (the system's
+    stored equivalent of S) and receives at least one overtime shift.  R is
+    kept as Reliever and never receives overtime.
+    """
+    status = normalize_attendance_value(attendance_status)
+    if status is None:
+        return None, 0.0
+
+    shifts = float(overtime_shifts or 0.0)
+    if attendance_date is not None and attendance_date.weekday() == 6 and status == 'Present':
+        status = 'OFF'
+        shifts = max(shifts, 1.0)
+
+    return status, normalize_overtime_shifts_for_status(status, shifts)
+
+
 def sum_eligible_overtime_shifts_sql():
-    """SQLAlchemy expression: SUM(overtime_shifts) for Present/OFF rows only."""
+    """SQLAlchemy expression: SUM(overtime_shifts) for Sunday/OFF rows only."""
     from sqlalchemy import case, func
     from models.attendance import Attendance
 
@@ -198,6 +224,16 @@ def sum_eligible_overtime_shifts_sql():
         ),
         0,
     ).label('total_overtime_shifts')
+
+
+def count_reliever_days_sql():
+    """SQLAlchemy expression for the number of reliever-duty attendance days."""
+    from sqlalchemy import case, func
+    from models.attendance import Attendance
+
+    return func.count(
+        case((Attendance.attendance_status.in_(RELIEVER_STATUSES), 1))
+    ).label('reliever_days')
 
 
 def round_to_half(x):
@@ -220,6 +256,8 @@ def normalize_attendance_value(value):
         return 'Absent'
     elif v in ['O', 'OFF']:
         return 'OFF'
+    elif v in ['R', 'RELIEVER', 'RELIEVER DUTY']:
+        return 'Reliever'
     else:
         # Try original mapping as fallback
         return STATUS_MAP.get(v.title())
@@ -263,6 +301,8 @@ def validate_required_columns(df, required_columns):
 
 def validate_employee_access(current_user, employee_id):
     """Validate that current user has access to employee data"""
+    from models.employee import Employee
+
     employee = Employee.query.filter_by(employee_id=employee_id).first()
     
     if not employee:

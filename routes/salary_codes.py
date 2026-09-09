@@ -207,6 +207,10 @@ def create_salary_code(current_user):
                 "message": f"Missing required fields: {', '.join(missing_fields)}"
             }), 400
 
+        from models.site import Site
+        payload['site_name'] = Site.normalize_name(payload['site_name'])
+        payload['state'] = str(payload['state']).strip()
+
         # Validate the data (skip skill_level validation for salary code creation)
         errors = validate_wage_master_data(payload, validate_skill_level=False)
         if errors:
@@ -241,7 +245,6 @@ def create_salary_code(current_user):
         skill_level = "Not Specified"  # Default value, will be set when employee is registered
 
         # Resolve or create site from site_name
-        from models.site import Site
         site = Site.get_or_create_site(
             payload["site_name"],
             payload["state"],
@@ -252,7 +255,7 @@ def create_salary_code(current_user):
 
         wage_master = WageMaster(
             salary_code=salary_code,
-            site_name=payload["site_name"],
+            site_name=site.site_name,
             site_id=site_id_val,
             rank=payload["rank"],
             state=payload["state"],
@@ -324,6 +327,14 @@ def bulk_create_salary_codes(current_user):
                     errors.append(f"Row {idx + 1}: Missing fields: {', '.join(missing_fields)}")
                     continue
 
+                site_name_val = Site.normalize_name(code_data['site_name'])
+                state_val = str(code_data['state']).strip()
+                if not site_name_val or not state_val:
+                    errors.append(f"Row {idx + 1}: site_name and state are required")
+                    continue
+                code_data['site_name'] = site_name_val
+                code_data['state'] = state_val
+
                 # Check if combination already exists
                 existing_wage = WageMaster.query.filter_by(
                     site_name=code_data["site_name"],
@@ -344,12 +355,11 @@ def bulk_create_salary_codes(current_user):
                 )
 
                 # Resolve or create site on the fly
-                site_name_val = code_data["site_name"]
-                state_val = code_data.get("state", "Unknown")
-                site_key = str(site_name_val).strip().lower()
+                site_key = site_name_val.casefold()
                 
                 if site_key in site_map:
                     site_id_val = site_map[site_key]
+                    site = Site.query.get(site_id_val)
                 else:
                     site = Site.get_or_create_site(
                         site_name_val,
@@ -361,7 +371,7 @@ def bulk_create_salary_codes(current_user):
 
                 wage_master = WageMaster(
                     salary_code=salary_code,
-                    site_name=code_data["site_name"],
+                    site_name=site.site_name,
                     site_id=site_id_val,
                     rank=code_data["rank"],
                     state=code_data["state"],
@@ -374,7 +384,7 @@ def bulk_create_salary_codes(current_user):
                 db.session.add(wage_master)
                 created_codes.append({
                     "salary_code": salary_code,
-                    "site_name": code_data["site_name"],
+                    "site_name": site.site_name,
                     "site_id": site_id_val,
                     "rank": code_data["rank"],
                     "state": code_data["state"],
@@ -494,6 +504,12 @@ def update_salary_code(current_user, salary_code):
         else:
             payload = request.form.to_dict()
 
+        if "site_name" in payload:
+            from models.site import Site
+            payload["site_name"] = Site.normalize_name(payload["site_name"])
+        if "state" in payload and payload["state"] is not None:
+            payload["state"] = str(payload["state"]).strip()
+
         # Validate the data
         errors = validate_wage_master_data(payload)
         if errors:
@@ -531,6 +547,7 @@ def update_salary_code(current_user, salary_code):
                 state_val,
                 created_by=current_user.email
             )
+            payload["site_name"] = site.site_name
             wage.site_id = site.site_id
 
 

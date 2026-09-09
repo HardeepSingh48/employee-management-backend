@@ -1,9 +1,10 @@
 from models import db
 from datetime import datetime
+from sqlalchemy import func
 
 class Site(db.Model):
     __tablename__ = 'sites'
-    
+
     site_id = db.Column(db.String(50), primary_key=True)
     site_name = db.Column(db.String(200), nullable=False)
     location = db.Column(db.String(500))
@@ -13,7 +14,7 @@ class Site(db.Model):
     created_by = db.Column(db.String(100))
     updated_date = db.Column(db.Date)
     updated_by = db.Column(db.String(100))
-    
+
     def to_dict(self):
         return {
             'site_id': self.site_id,
@@ -26,24 +27,42 @@ class Site(db.Model):
             'updated_date': self.updated_date.isoformat() if self.updated_date else None,
             'updated_by': self.updated_by
         }
-    
+
     def __repr__(self):
         return f"<Site {self.site_id} - {self.site_name}>"
-    
+
+    @staticmethod
+    def normalize_name(site_name: str) -> str:
+        """Return the canonical form used when comparing site names."""
+        if not isinstance(site_name, str):
+            return ""
+        return site_name.strip()
+
+    @classmethod
+    def find_by_name(cls, site_name: str, exclude_site_id: str = None):
+        """Find a site by trimmed, case-insensitive name."""
+        site_name_clean = cls.normalize_name(site_name)
+        if not site_name_clean:
+            return None
+
+        query = cls.query.filter(
+            func.trim(func.lower(cls.site_name)) == site_name_clean.lower()
+        )
+        if exclude_site_id:
+            query = query.filter(cls.site_id != exclude_site_id)
+        return query.first()
+
     @classmethod
     def get_or_create_site(cls, site_name: str, state: str, created_by: str = "system") -> "Site":
         """Get a site by name (case-insensitive, trimmed) or create it if not found."""
-        from sqlalchemy import func
         import uuid
-        
-        site_name_clean = site_name.strip()
+
+        site_name_clean = cls.normalize_name(site_name)
         state_clean = state.strip() if state else "Unknown"
-        
+
         # Look for site by name (case-insensitive, trimmed)
-        site = cls.query.filter(
-            func.trim(func.lower(cls.site_name)) == func.trim(func.lower(site_name_clean))
-        ).first()
-        
+        site = cls.find_by_name(site_name_clean)
+
         if not site:
             # Create a new site
             site_id = f"SITE-{uuid.uuid4().hex[:8].upper()}"
@@ -57,13 +76,13 @@ class Site(db.Model):
             db.session.add(site)
             # Flush to get the site_id and ensure it's queryable in the transaction
             db.session.flush()
-            
+
         return site
 
     @classmethod
     def cleanup_if_orphaned(cls, site_id: str) -> bool:
         """Delete a site if it has no active wage masters and no employees.
-        
+
         Returns True if the site was deleted, False if it still has references.
         Should be called after deleting/deactivating wage masters.
         """
@@ -87,4 +106,4 @@ class Site(db.Model):
 
         db.session.delete(site)
         return True
-
+

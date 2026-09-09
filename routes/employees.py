@@ -1,4 +1,4 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, send_file
 from services.employee_service import create_employee, bulk_import_from_frames, get_employee_by_id, get_all_employees, get_all_employees_unpaginated, search_employees, synchronize_employee_id_sequence
 from models import db
 from models.employee import Employee
@@ -7,12 +7,131 @@ from models.department import Department
 from utils.upload import save_file
 from models.account_details import AccountDetails
 from routes.auth import token_required
-from sqlalchemy import text
+from sqlalchemy import text, false
 import pandas as pd
+import io
 from datetime import datetime
 import traceback
 
 employees_bp = Blueprint("employees", __name__)
+
+
+def _build_employee_query(
+    current_user,
+    *,
+    search_term='',
+    site_id='',
+    department='',
+    employment_status='',
+    include_deleted=False,
+):
+    """Build the shared employee query used by list and export endpoints."""
+    query = Employee.query if include_deleted else Employee.query.filter_by(is_deleted=False)
+
+    # Supervisors remain restricted to their assigned site.  Employee.site_id
+    # is preferred, while WageMaster.site_id keeps older registrations visible
+    # when the employee-level site was not backfilled.
+    effective_site_id = current_user.site_id if current_user.role == 'supervisor' else site_id
+    if current_user.role == 'supervisor' and not effective_site_id:
+        return query.filter(false())
+
+    if effective_site_id:
+        query = query.outerjoin(WageMaster, Employee.salary_code == WageMaster.salary_code)
+        query = query.filter(
+            db.or_(
+                Employee.site_id == effective_site_id,
+                WageMaster.site_id == effective_site_id,
+            )
+        )
+
+    if search_term:
+        search_filter = f"%{search_term}%"
+        query = query.filter(
+            db.or_(
+                Employee.first_name.ilike(search_filter),
+                Employee.last_name.ilike(search_filter),
+                Employee.employee_id.cast(db.String).ilike(search_filter),
+                Employee.email.ilike(search_filter),
+                Employee.phone_number.ilike(search_filter),
+                Employee.designation.ilike(search_filter),
+            )
+        )
+
+    if department:
+        query = query.filter(Employee.department_id.ilike(f"%{department}%"))
+
+    if employment_status:
+        query = query.filter(Employee.employment_status.ilike(f"%{employment_status}%"))
+
+    return query
+
+
+def _employee_export_row(employee, account=None):
+    """Return a stable, spreadsheet-friendly representation of an employee."""
+    date_fields = ('date_of_birth', 'hire_date', 'created_date', 'updated_date', 'left_on')
+
+    row = {
+        'employee_id': employee.employee_id,
+        'first_name': employee.first_name,
+        'last_name': employee.last_name,
+        'full_name': f"{employee.first_name or ''} {employee.last_name or ''}".strip(),
+        'father_name': employee.father_name,
+        'address': employee.address,
+        'adhar_number': employee.adhar_number,
+        'place_of_birth': employee.place_of_birth,
+        'marital_status': employee.marital_status,
+        'date_of_birth': employee.date_of_birth,
+        'email': employee.email,
+        'phone_number': employee.phone_number,
+        'hire_date': employee.hire_date,
+        'created_date': employee.created_date,
+        'updated_date': employee.updated_date,
+        'job_title': employee.job_title,
+        'family_details': employee.family_details,
+        'department_id': employee.department_id,
+        'employment_status': employee.employment_status,
+        'gender': employee.gender,
+        'nationality': employee.nationality,
+        'blood_group': employee.blood_group,
+        'alternate_contact_number': employee.alternate_contact_number,
+        'pan_card_number': employee.pan_card_number,
+        'voter_id_driving_license': employee.voter_id_driving_license,
+        'uan': employee.uan,
+        'esic_number': employee.esic_number,
+        'employment_type': employee.employment_type,
+        'designation': employee.designation,
+        'work_location': employee.work_location,
+        'reporting_manager': employee.reporting_manager,
+        'base_salary': employee.base_salary,
+        'salary_code': employee.salary_code,
+        'site_id': employee.site_id,
+        'skill_category': employee.skill_category,
+        'wage_rate': employee.wage_rate,
+        'pf_applicability': employee.pf_applicability,
+        'esic_applicability': employee.esic_applicability,
+        'professional_tax_applicability': employee.professional_tax_applicability,
+        'salary_advance_loan': employee.salary_advance_loan,
+        'highest_qualification': employee.highest_qualification,
+        'year_of_passing': employee.year_of_passing,
+        'additional_certifications': employee.additional_certifications,
+        'experience_duration': employee.experience_duration,
+        'emergency_contact_name': employee.emergency_contact_name,
+        'emergency_contact_relationship': employee.emergency_contact_relationship,
+        'emergency_contact_phone': employee.emergency_contact_phone,
+        'bank_account_number': account.account_number if account else None,
+        'bank_name': account.bank_name if account else None,
+        'ifsc_code': account.ifsc_code if account else None,
+        'branch_name': account.branch_name if account else None,
+        # Soft-delete control fields intentionally stay out of employee exports.
+        # ``left_on`` is retained because it is the official last-working date.
+        'left_on': employee.left_on,
+    }
+
+    for field in date_fields:
+        if row[field] is not None:
+            row[field] = row[field].isoformat()
+
+    return row
 
 @employees_bp.route("/register", methods=["POST"])
 def register_employee():
@@ -1013,6 +1132,63 @@ def get_employee(employee_id):
         return jsonify({"success": False, "message": str(e)}), 400
 
 
+@employees_bp.route("/export-excel", methods=["GET", "OPTIONS"])
+@token_required
+def export_employees_excel(current_user):
+    """Export all employees matching the list filters to an Excel workbook."""
+    if request.method == 'OPTIONS':
+        return '', 200
+
+    try:
+        search_term = request.args.get('search', '').strip()
+        site_id = request.args.get('site_id', '').strip()
+        department = request.args.get('department', '').strip()
+        employment_status = request.args.get('status', '').strip()
+        include_deleted = request.args.get('include_deleted', '').lower() == 'true'
+
+        employees = _build_employee_query(
+            current_user,
+            search_term=search_term,
+            site_id=site_id,
+            department=department,
+            employment_status=employment_status,
+            include_deleted=include_deleted,
+        ).order_by(Employee.employee_id.asc()).all()
+
+        employee_ids = [employee.employee_id for employee in employees]
+        accounts = {
+            account.emp_id: account
+            for account in AccountDetails.query.filter(AccountDetails.emp_id.in_(employee_ids)).all()
+        } if employee_ids else {}
+
+        rows = [
+            _employee_export_row(employee, accounts.get(employee.employee_id))
+            for employee in employees
+        ]
+
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            pd.DataFrame(rows).to_excel(writer, sheet_name='Employees', index=False)
+            worksheet = writer.sheets['Employees']
+            worksheet.freeze_panes = 'A2'
+            worksheet.auto_filter.ref = worksheet.dimensions
+
+            for column_cells in worksheet.columns:
+                column_letter = column_cells[0].column_letter
+                max_length = max(len(str(cell.value or '')) for cell in column_cells)
+                worksheet.column_dimensions[column_letter].width = min(max(max_length + 2, 12), 40)
+
+        output.seek(0)
+        return send_file(
+            output,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            as_attachment=True,
+            download_name='employees.xlsx',
+        )
+    except Exception as e:
+        return jsonify({"success": False, "message": f"Error exporting employees: {str(e)}"}), 500
+
+
 @employees_bp.route("/<employee_id>", methods=["PUT", "DELETE", "OPTIONS"])
 @token_required
 def update_employee(current_user, employee_id):
@@ -1071,12 +1247,42 @@ def update_employee(current_user, employee_id):
             "professional_tax_applicability", "salary_advance_loan", "highest_qualification",
             "year_of_passing", "additional_certifications", "experience_duration",
             "emergency_contact_name", "emergency_contact_relationship", "emergency_contact_phone",
-            "department_id", "employment_status"
+            "department_id", "employment_status", "site_id"
         ]
 
         # Handle boolean fields that come as strings
         boolean_fields = ["pf_applicability", "esic_applicability", "professional_tax_applicability"]
         date_fields = ["date_of_birth", "hire_date"]
+
+        # Validate the replacement before changing any fields.  This keeps a
+        # deleted/invalid previous salary code from preventing a valid transfer.
+        if 'salary_code' in payload:
+            new_salary_code = payload.get('salary_code')
+            if not isinstance(new_salary_code, str) or not new_salary_code.strip():
+                return jsonify({
+                    "success": False,
+                    "message": "A valid salary code is required when updating salary code."
+                }), 400
+
+            new_salary_code = new_salary_code.strip()
+            wage_master = WageMaster.query.filter_by(
+                salary_code=new_salary_code,
+                is_active=True,
+            ).first()
+            if not wage_master:
+                return jsonify({
+                    "success": False,
+                    "message": f"Salary code '{new_salary_code}' does not exist or is inactive."
+                }), 400
+
+            # Keep the canonical value returned by the wage master, including
+            # its original casing, and handle it outside the generic loop.
+            payload['salary_code'] = wage_master.salary_code
+            # A salary-code transfer also transfers the employee to the site
+            # assigned to that wage master.  This keeps Employee.site_id and
+            # WageMaster.site_id consistent for filtering and reporting.
+            if wage_master.site_id:
+                payload['site_id'] = wage_master.site_id
 
         for field in employee_fields:
             if field in payload and payload[field] is not None:
@@ -1101,13 +1307,6 @@ def update_employee(current_user, employee_id):
 
                 setattr(emp, field, value)
 
-        # Update account details if provided
-        account = AccountDetails.query.filter_by(emp_id=employee_id).first()
-        if not account:
-            # Create account details if they don't exist
-            account = AccountDetails(emp_id=employee_id)
-            db.session.add(account)
-
         account_fields = {
             "bank_account_number": "account_number",
             "bank_name": "bank_name",
@@ -1115,9 +1314,23 @@ def update_employee(current_user, employee_id):
             "branch_name": "branch_name"
         }
 
-        for payload_field, db_field in account_fields.items():
-            if payload_field in payload and payload[payload_field] is not None:
-                setattr(account, db_field, payload[payload_field])
+        # Do not create an incomplete account row during unrelated updates
+        # (for example, a salary-code transfer).  AccountDetails has required
+        # fields, so it is created only when account data was actually sent.
+        account_payload = {
+            payload_field: payload[payload_field]
+            for payload_field in account_fields
+            if payload_field in payload and payload[payload_field] is not None
+        }
+        account = AccountDetails.query.filter_by(emp_id=employee_id).first()
+        if account_payload and not account:
+            account = AccountDetails(emp_id=employee_id)
+            db.session.add(account)
+
+        if account:
+            for payload_field, db_field in account_fields.items():
+                if payload_field in account_payload:
+                    setattr(account, db_field, account_payload[payload_field])
 
         db.session.commit()
 
@@ -1132,7 +1345,9 @@ def update_employee(current_user, employee_id):
                 "phone_number": emp.phone_number,
                 "department_id": emp.department_id,
                 "designation": emp.designation,
-                "employment_status": emp.employment_status
+                "employment_status": emp.employment_status,
+                "salary_code": emp.salary_code,
+                "site_id": emp.site_id,
             }
         }), 200
     except Exception as e:
@@ -1160,37 +1375,20 @@ def list_employees(current_user):  # Add current_user parameter
         page = int(request.args.get('page', 1))
         per_page = int(request.args.get('per_page', 10))
         search_term = request.args.get('search', '').strip()
+        site_id = request.args.get('site_id', '').strip()
         department = request.args.get('department', '').strip()
         employment_status = request.args.get('status', '').strip()
 
         # Base query — never show soft-deleted employees by default
         include_deleted = request.args.get('include_deleted', '').lower() == 'true'
-        query = Employee.query if include_deleted else Employee.query.filter_by(is_deleted=False)
-
-        # Filter employees based on user role
-        if current_user.role == 'supervisor':
-            # Supervisor can only see employees from their site
-            query = query.filter_by(site_id=current_user.site_id)
-
-        # Apply search filters
-        if search_term:
-            search_filter = f"%{search_term}%"
-            query = query.filter(
-                db.or_(
-                    Employee.first_name.ilike(search_filter),
-                    Employee.last_name.ilike(search_filter),
-                    Employee.employee_id.cast(db.String).ilike(search_filter),
-                    Employee.email.ilike(search_filter),
-                    Employee.phone_number.ilike(search_filter),
-                    Employee.designation.ilike(search_filter)
-                )
-            )
-
-        if department:
-            query = query.filter(Employee.department_id.ilike(f"%{department}%"))
-
-        if employment_status:
-            query = query.filter(Employee.employment_status.ilike(f"%{employment_status}%"))
+        query = _build_employee_query(
+            current_user,
+            search_term=search_term,
+            site_id=site_id,
+            department=department,
+            employment_status=employment_status,
+            include_deleted=include_deleted,
+        )
 
         # Apply pagination
         employees = query.paginate(page=page, per_page=per_page, error_out=False)
@@ -1207,6 +1405,7 @@ def list_employees(current_user):  # Add current_user parameter
                 "designation": emp.designation,
                 "employment_status": emp.employment_status,
                 "site_id": emp.site_id,
+                "salary_code": emp.salary_code,
                 "hire_date": emp.hire_date.isoformat() if emp.hire_date else None
             })
 
@@ -1265,6 +1464,7 @@ def get_all_employees_simple():
                 "work_location": emp.work_location,
                 "reporting_manager": emp.reporting_manager,
                 "salary_code": emp.salary_code,
+                "site_id": emp.site_id,
                 "skill_category": emp.skill_category,
                 "pf_applicability": emp.pf_applicability,
                 "esic_applicability": emp.esic_applicability,
